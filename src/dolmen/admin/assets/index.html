@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dolmen — build front end</title>
+<link rel="stylesheet" href="/_dolmen/assets/app.css">
+</head>
+<body>
+
+<header class="bar">
+  <span class="brand">dolmen</span>
+  <span class="site-name" id="site-name"></span>
+  <span class="spacer"></span>
+  <span class="status" id="status">ready</span>
+  <button id="new-btn" class="btn">New</button>
+  <button id="build-btn" class="btn">Rebuild</button>
+  <button id="save-btn" class="btn btn-primary" disabled>Save</button>
+</header>
+
+<main class="layout">
+  <aside class="pane files" id="files-pane">
+    <div class="pane-head">
+      <input id="filter" type="search" placeholder="Filter files…" autocomplete="off">
+    </div>
+    <div class="tree" id="tree"></div>
+  </aside>
+
+  <section class="pane editor-pane">
+    <div class="pane-head">
+      <span class="path" id="open-path">No file open</span>
+      <span class="spacer"></span>
+      <span class="hint">Drag an image in to upload it</span>
+    </div>
+    <div id="editor" class="editor"></div>
+    <div class="drop-veil" id="drop-veil"><span>Drop image to upload</span></div>
+  </section>
+
+  <section class="pane preview-pane">
+    <div class="pane-head">
+      <span class="path" id="preview-url">/</span>
+      <span class="spacer"></span>
+      <button id="preview-open" class="btn btn-quiet" title="Open in a new tab">↗</button>
+    </div>
+    <iframe id="preview" class="preview" src="/" title="Live preview"></iframe>
+  </section>
+</main>
+
+<dialog id="new-dialog">
+  <form method="dialog" id="new-form">
+    <h2>New document</h2>
+    <label>Title <input name="title" required autocomplete="off" placeholder="My new page"></label>
+    <label>Collection <select name="collection" id="new-collection"></select></label>
+    <label>Layout <select name="layout" id="new-layout"></select></label>
+    <menu>
+      <button value="cancel" class="btn">Cancel</button>
+      <button value="create" class="btn btn-primary" id="new-create">Create</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+<script src="/_dolmen/assets/app.js"></script>
+</body>
+</html>
