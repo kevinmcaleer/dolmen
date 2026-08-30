@@ -31,6 +31,8 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
+from .permalinks import slugify
+
 #: `[[target]]` or `[[target|label]]`.
 WIKILINK_RE = re.compile(r"\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]")
 
@@ -82,7 +84,14 @@ class MarkdownRenderer:
             .use(deflist_plugin)
             .use(tasklists_plugin, enabled=True)
             .use(attrs_plugin, spans=True)
-            .use(anchors_plugin, max_level=max(self.anchor_levels), permalink=False)
+            # slug_func is ours so `[[Page#Section]]` can compute the same
+            # anchor the heading was given.
+            .use(
+                anchors_plugin,
+                max_level=max(self.anchor_levels),
+                permalink=False,
+                slug_func=slugify,
+            )
         )
         md.use(self._wikilink_plugin)
         for extension in self.extensions:

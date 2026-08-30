@@ -235,3 +235,44 @@ def test_every_problem_explains_why_it_matters(clean_site: Path):
     for problem in report.problems:
         assert problem.why, f"{problem.rule} has no explanation"
         assert problem.title and problem.message
+
+
+def test_unknown_heading_target_is_reported(clean_site: Path):
+    (clean_site / "guide.md").write_text(
+        "---\ntitle: Guide\n---\n\n## Real Section\n\nBody\n", encoding="utf-8"
+    )
+    (clean_site / "uses.md").write_text(
+        "---\ntitle: Uses\n---\n\n[[Guide#No Such Section]]\n", encoding="utf-8"
+    )
+    report = check(clean_site)
+    assert "unknown-heading" in rules(report)
+
+
+def test_valid_heading_target_is_not_reported(clean_site: Path):
+    (clean_site / "guide.md").write_text(
+        "---\ntitle: Guide\n---\n\n## Real Section\n\nBody\n", encoding="utf-8"
+    )
+    (clean_site / "uses.md").write_text(
+        "---\ntitle: Uses\n---\n\n[[Guide#Real Section]]\n", encoding="utf-8"
+    )
+    assert "unknown-heading" not in rules(check(clean_site))
+
+
+def test_ambiguous_title_is_reported_when_something_links_to_it(clean_site: Path):
+    (clean_site / "one.md").write_text("---\ntitle: Twin\n---\nA\n", encoding="utf-8")
+    (clean_site / "two.md").write_text("---\ntitle: Twin\n---\nB\n", encoding="utf-8")
+    (clean_site / "uses.md").write_text(
+        "---\ntitle: Uses\n---\n\n[[Twin]]\n", encoding="utf-8"
+    )
+    report = check(clean_site)
+    assert "ambiguous-wikilink" in rules(report)
+
+
+def test_broken_wikilink_line_points_at_the_link(clean_site: Path):
+    (clean_site / "uses.md").write_text(
+        "---\ntitle: Uses\nlayout: page\n---\n\nfiller\n\n[[Nope]]\n", encoding="utf-8"
+    )
+    report = check(clean_site)
+    problem = next(p for p in report.problems if p.rule == "broken-wikilink")
+    lines = (clean_site / "uses.md").read_text(encoding="utf-8").splitlines()
+    assert "[[Nope]]" in lines[problem.line - 1]

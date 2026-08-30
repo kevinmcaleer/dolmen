@@ -28,6 +28,7 @@ import yaml
 
 from .config import CONFIG_NAME, SPECIAL_DIRS, Config, load_config, looks_like_a_site
 from .exceptions import ConfigError, StaticError
+from .links import LinkIndex, anchor_for, build_index, split_target
 from .markdown import MarkdownRenderer
 from .models import Document, Site, StaticFile, read_document
 from .permalinks import apply as apply_permalink
@@ -58,6 +59,8 @@ class Builder:
         self.plugins = PluginManager()
         self.site = Site(config=config, time=dt.datetime.now(dt.UTC))
         self.warnings: list[str] = []
+        #: Populated during rendering; read by the validator and the front end.
+        self.link_index = LinkIndex()
 
     # -- entry point ---------------------------------------------------------
 
@@ -305,13 +308,18 @@ class Builder:
     # -- 4. rendering --------------------------------------------------------
 
     def _render(self) -> None:
-        url_map = {d.title.casefold(): d.url for d in self.site.documents if d.title}
+        # The link index is built before rendering so every `[[target]]` resolves
+        # against final URLs, and so backlinks are known in time to be exposed
+        # as `page.backlinks`.
+        self.link_index = build_index(self.site)
+        self._attach_backlinks()
 
         def resolve(target: str) -> str | None:
-            document = self.site.find_by_title(target)
-            if document is not None:
-                return document.url
-            return url_map.get(target.casefold())
+            page, heading = split_target(target)
+            document = self.site.find_by_title(page)
+            if document is None:
+                return None
+            return f"{document.url}#{anchor_for(heading)}" if heading else document.url
 
         markdown = MarkdownRenderer(
             link_resolver=resolve,
@@ -377,6 +385,14 @@ class Builder:
                 output = replacement
 
         document.content = output
+
+    def _attach_backlinks(self) -> None:
+        """Expose `page.backlinks` — who links here — to templates."""
+        for document in self.site.documents:
+            document.metadata["backlinks"] = [
+                {"title": source.title, "url": source.url, "path": str(source.relative_path)}
+                for source in self.link_index.backlinks(document)
+            ]
 
     def _is_published(self, document: Document) -> bool:
         """Whether a document gets written to the output directory.

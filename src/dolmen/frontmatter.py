@@ -28,13 +28,16 @@ class Document:
     content: str
     #: True when the file opened with a `---` fence.
     has_front_matter: bool
+    #: 1-indexed line of the file on which `content` starts. Front matter pushes
+    #: the body down, so a body-relative line is not a file line without this.
+    body_line: int = 1
 
 
 def split(text: str, path: Path | None = None) -> Document:
     """Split `text` into front matter and body."""
     match = _FENCE_RE.match(text)
     if match is None:
-        return Document(metadata={}, content=text, has_front_matter=False)
+        return Document(metadata={}, content=text, has_front_matter=False, body_line=1)
 
     raw = match.group("meta")
     try:
@@ -47,7 +50,12 @@ def split(text: str, path: Path | None = None) -> Document:
     if not isinstance(metadata, dict):
         raise FrontMatterError("front matter must be a mapping", path)
 
-    return Document(metadata=metadata, content=text[match.end():], has_front_matter=True)
+    return Document(
+        metadata=metadata,
+        content=text[match.end():],
+        has_front_matter=True,
+        body_line=text[: match.end()].count("\n") + 1,
+    )
 
 
 def load(path: Path) -> Document:

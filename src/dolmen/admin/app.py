@@ -216,6 +216,34 @@ def admin_routes(site: DevSite) -> list[Route]:
             }
         )
 
+    async def documents(request: Request) -> JSONResponse:
+        """Every document, for `[[` autocomplete and the backlinks view."""
+        site_model = site.last_site
+        index = site.last_index
+        if site_model is None:
+            return JSONResponse({"documents": []})
+
+        payload = []
+        for document in site_model.documents:
+            backlinks = index.backlinks(document) if index else []
+            payload.append(
+                {
+                    "title": document.title,
+                    "slug": document.slug,
+                    "path": str(document.relative_path),
+                    "url": document.url,
+                    "collection": document.collection,
+                    "headings": sorted(_heading_ids(document)),
+                    "backlinks": [
+                        {"title": b.title, "path": str(b.relative_path), "url": b.url}
+                        for b in backlinks
+                    ],
+                }
+            )
+        return JSONResponse(
+            {"documents": sorted(payload, key=lambda d: (d["title"] or d["path"]).lower())}
+        )
+
     async def problems(request: Request) -> JSONResponse:
         """Everything wrong with the site, for the problems panel."""
         return JSONResponse(site.problems())
@@ -257,11 +285,19 @@ def admin_routes(site: DevSite) -> list[Route]:
         Route("/api/upload", upload, methods=["POST"]),
         Route("/api/build", rebuild, methods=["POST"]),
         Route("/api/problems", problems),
+        Route("/api/documents", documents),
         Route("/assets/{path:path}", asset),
     ]
 
 
 # -- helpers ----------------------------------------------------------------
+
+
+def _heading_ids(document: Any) -> set[str]:
+    """Heading anchors on a rendered document, for `[[Page#Section]]` completion."""
+    from ..links import heading_ids
+
+    return heading_ids(document.content or "")
 
 
 def _walk(root: Path) -> list[dict[str, Any]]:

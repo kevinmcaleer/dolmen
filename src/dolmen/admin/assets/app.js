@@ -36,6 +36,7 @@ const api = {
     return (await fetch("/_dolmen/api/build", { method: "POST" })).json();
   },
   async problems() { return (await fetch("/_dolmen/api/problems")).json(); },
+  async documents() { return (await fetch("/_dolmen/api/documents")).json(); },
   async upload(file) {
     const body = new FormData();
     body.append("file", file);
@@ -46,7 +47,10 @@ const api = {
 };
 
 const el = (id) => document.getElementById(id);
-const state = { editor: null, path: null, dirty: false, entries: [], meta: null, report: null };
+const state = {
+  editor: null, path: null, dirty: false,
+  entries: [], meta: null, report: null, documents: [],
+};
 
 /* ---------- chrome ---------- */
 
@@ -173,6 +177,8 @@ async function openFile(path, line) {
     el("preview").src = file.url;
   }
 
+  renderBacklinks();
+
   if (line) {
     state.editor.revealLineInCenter(line);
     state.editor.setPosition({ lineNumber: line, column: 1 });
@@ -194,6 +200,7 @@ async function saveFile() {
       toast("Saved");
       refreshTree();
       refreshProblems();
+      refreshDocuments();
     }
   } catch (error) {
     setStatus("save failed", "bad");
@@ -412,6 +419,110 @@ function toggleProblems(force) {
   if (open) renderProblems(state.report || { total: 0, problems: [] });
 }
 
+
+/* ---------- wiki links ----------
+ *
+ * Typing `[[` offers every document by title, and `[[Page#` offers that page's
+ * headings. Monaco owns the widget; all we supply is the list and the range to
+ * replace, so the trigger has to match exactly what the user has typed so far.
+ */
+
+function wikiCompletionProvider() {
+  return {
+    triggerCharacters: ["[", "#", "|"],
+    provideCompletionItems(model, position) {
+      const line = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      });
+
+      // Only inside an unclosed `[[ ... `.
+      const open = line.lastIndexOf("[[");
+      if (open === -1) return { suggestions: [] };
+      const typed = line.slice(open + 2);
+      if (typed.includes("]]")) return { suggestions: [] };
+
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: open + 3,
+        endColumn: position.column,
+      };
+
+      const hash = typed.indexOf("#");
+      if (hash !== -1) {
+        const pageName = typed.slice(0, hash).trim().toLowerCase();
+        const doc = (state.documents || []).find(
+          (d) => (d.title || "").toLowerCase() === pageName,
+        );
+        if (!doc) return { suggestions: [] };
+        return {
+          suggestions: doc.headings.map((heading) => ({
+            label: heading,
+            kind: monaco.languages.CompletionItemKind.Reference,
+            insertText: heading,
+            detail: `heading in ${doc.title}`,
+            range: { ...range, startColumn: open + 3 + hash + 1 },
+          })),
+        };
+      }
+
+      return {
+        suggestions: (state.documents || []).map((doc) => ({
+          label: doc.title || doc.path,
+          kind: monaco.languages.CompletionItemKind.File,
+          insertText: doc.title || doc.path,
+          detail: doc.path,
+          documentation: doc.backlinks.length
+            ? `${doc.backlinks.length} backlink(s)`
+            : undefined,
+          range,
+        })),
+      };
+    },
+  };
+}
+
+async function refreshDocuments() {
+  try {
+    const data = await api.documents();
+    state.documents = data.documents;
+    renderBacklinks();
+  } catch (error) {
+    console.warn("could not fetch documents", error);
+  }
+}
+
+function renderBacklinks() {
+  const box = el("backlinks");
+  if (!box) return;
+  const doc = (state.documents || []).find((d) => d.path === state.path);
+  const links = doc ? doc.backlinks : [];
+
+  box.replaceChildren();
+  if (!links.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+
+  const heading = document.createElement("span");
+  heading.className = "backlinks__label";
+  heading.textContent = `Linked from (${links.length}):`;
+  box.append(heading);
+
+  for (const link of links) {
+    const a = document.createElement("button");
+    a.className = "backlinks__link";
+    a.textContent = link.title || link.path;
+    a.title = link.path;
+    a.onclick = () => openFile(link.path);
+    box.append(a);
+  }
+}
+
 /* ---------- boot ---------- */
 
 require.config({
@@ -450,6 +561,7 @@ require(["vs/editor/editor.main"], async () => {
     }
     refreshTree();
     refreshProblems();
+    refreshDocuments();
   };
 
   el("problems-badge").onclick = () => toggleProblems();
@@ -467,9 +579,12 @@ require(["vs/editor/editor.main"], async () => {
     if (state.dirty) event.preventDefault();
   });
 
+  monaco.languages.registerCompletionItemProvider("markdown", wikiCompletionProvider());
+
   wireDropZone();
   await refreshTree();
   await wireNewDialog();
   await refreshProblems();
+  await refreshDocuments();
   setStatus("ready", "ok");
 });

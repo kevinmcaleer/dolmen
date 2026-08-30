@@ -92,6 +92,7 @@ class DevSite:
         #: The Site from the last successful build, kept so the problems panel
         #: can validate without paying for another build.
         self.last_site: Any = None
+        self.last_index: Any = None
         self._lock = threading.Lock()
 
     @property
@@ -107,7 +108,12 @@ class DevSite:
             return Report().to_dict()
         config = load_config(self.source, self.overrides)
         warnings = self.last_result.warnings if self.last_result else []
-        return validate(self.last_site, config, build_warnings=warnings).to_dict()
+        return validate(
+            self.last_site,
+            config,
+            build_warnings=warnings,
+            link_index=self.last_index,
+        ).to_dict()
 
     def build(self) -> BuildResult | None:
         """Rebuild, capturing errors so a bad save never kills the server."""
@@ -116,6 +122,7 @@ class DevSite:
                 builder = Builder.from_source(self.source, overrides=self.overrides)
                 self.last_result = builder.build()
                 self.last_site = builder.site
+                self.last_index = builder.link_index
                 self.last_error = None
             except StaticError as exc:
                 self.last_error = str(exc)

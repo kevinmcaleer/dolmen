@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
-from .markdown import find_wikilinks
+from .links import LinkIndex, anchor_for, build_index, heading_ids
 from .permalinks import to_output_path
 
 if TYPE_CHECKING:
@@ -136,10 +136,13 @@ class Validator:
         config: Config,
         *,
         build_warnings: list[str] | None = None,
+        link_index: LinkIndex | None = None,
     ) -> None:
         self.site = site
         self.config = config
         self.build_warnings = build_warnings or []
+        #: Reuse the build's index when there is one; rebuild it otherwise.
+        self.link_index = link_index
         self.output = config.destination
         self._output_files = self._index_output()
 
@@ -284,29 +287,78 @@ class Validator:
         return problems
 
     def _check_wikilinks(self) -> list[Problem]:
+        """Broken targets, unknown headings, and ambiguous titles."""
+        index = self.link_index or build_index(self.site)
         problems = []
-        for document in self.site.documents:
-            for target in find_wikilinks(document.body):
-                if self.site.find_by_title(target) is not None:
+
+        for document, link in index.broken():
+            problems.append(
+                Problem(
+                    severity="warning",
+                    rule="broken-wikilink",
+                    title=f"`[[{link.target}]]` does not resolve",
+                    message=(
+                        f"{document.relative_path} links to `{link.page}`, but no document "
+                        "has that title, slug or filename."
+                    ),
+                    why=(
+                        "The link still renders, marked as broken, so readers see a "
+                        "dead link on the published page."
+                    ),
+                    file=str(document.relative_path),
+                    line=link.line,
+                    url=document.url or None,
+                )
+            )
+
+        # A heading target has to name a heading that exists on the target page.
+        for path, links in index.outgoing.items():
+            source = index.documents[path]
+            for link in links:
+                if link.heading is None or link.resolved is None:
+                    continue
+                available = heading_ids(link.resolved.content or "")
+                anchor = anchor_for(link.heading)
+                if anchor in available:
                     continue
                 problems.append(
                     Problem(
                         severity="warning",
-                        rule="broken-wikilink",
-                        title=f"`[[{target}]]` does not resolve",
+                        rule="unknown-heading",
+                        title=f"`{link.resolved.title}` has no heading `{link.heading}`",
                         message=(
-                            f"{document.relative_path} links to `{target}`, but no document "
-                            "has that title, slug or filename."
+                            f"{path} links to `[[{link.target}]]`, but that page has no "
+                            f"matching heading."
+                            + (f" It has: {', '.join(sorted(available)[:6])}." if available else "")
                         ),
                         why=(
-                            "The link still renders, marked as broken, so readers see a "
-                            "dead link on the published page."
+                            "The link lands on the page but not the section, so the reader "
+                            "has to hunt for what you were pointing at."
                         ),
-                        file=str(document.relative_path),
-                        line=_find_line(document, f"[[{target}"),
-                        url=document.url or None,
+                        file=path,
+                        line=link.line,
+                        url=source.url or None,
                     )
                 )
+
+        for title, documents in index.ambiguous.items():
+            if not index.incoming_for_title(title):
+                continue
+            paths = ", ".join(str(d.relative_path) for d in documents)
+            problems.append(
+                Problem(
+                    severity="warning",
+                    rule="ambiguous-wikilink",
+                    title=f"More than one document is titled `{documents[0].title}`",
+                    message=f"`[[{documents[0].title}]]` could mean any of: {paths}.",
+                    why=(
+                        "Links resolve to the first by collection then path, which is "
+                        "stable but arbitrary — rename one, or link by filename instead."
+                    ),
+                    file=str(documents[0].relative_path),
+                    line=1,
+                )
+            )
         return problems
 
     def _check_links_and_images(self) -> list[Problem]:
@@ -443,6 +495,14 @@ def _find_line(document: Document, needle: str) -> int | None:
     return text[:index].count("\n") + 1
 
 
-def validate(site: Site, config: Config, *, build_warnings: list[str] | None = None) -> Report:
+def validate(
+    site: Site,
+    config: Config,
+    *,
+    build_warnings: list[str] | None = None,
+    link_index: LinkIndex | None = None,
+) -> Report:
     """Run every check over a built site."""
-    return Validator(site, config, build_warnings=build_warnings).run()
+    return Validator(
+        site, config, build_warnings=build_warnings, link_index=link_index
+    ).run()

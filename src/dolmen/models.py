@@ -35,6 +35,8 @@ class Document:
     body: str
 
     url: str = ""
+    #: 1-indexed line of the source file on which `body` starts.
+    body_line: int = 1
     #: Rendered body, filled in during the build.
     content: str = ""
     date: dt.datetime | None = None
@@ -234,6 +236,7 @@ def read_document(
         collection=collection,
         metadata=parsed.metadata,
         body=parsed.content,
+        body_line=parsed.body_line,
         slug=permalinks.slugify(slug),
     )
     document.date = _resolve_date(document, date)

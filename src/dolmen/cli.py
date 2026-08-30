@@ -163,7 +163,12 @@ def doctor(source: Path, strict: bool) -> None:
         _fail(exc)
         return
 
-    report = validate(builder.site, builder.config, build_warnings=result.warnings)
+    report = validate(
+        builder.site,
+        builder.config,
+        build_warnings=result.warnings,
+        link_index=builder.link_index,
+    )
 
     if not report.total:
         click.secho("no problems found", fg="green")
