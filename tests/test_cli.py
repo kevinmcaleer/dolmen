@@ -142,3 +142,28 @@ def test_drafts_flag_includes_drafts(runner, tmp_path: Path):
 
     runner.invoke(main, ["build", "--source", str(site), "--drafts"])
     assert list((site / "_site").rglob("*wip*"))
+
+
+def test_a_deleted_working_directory_is_reported_clearly(runner, tmp_path: Path, monkeypatch):
+    """Regression: this raised a bare FileNotFoundError traceback.
+
+    A shell sitting in a directory that gets deleted keeps it as its cwd — the
+    inode stays alive, so `Path('.').is_dir()` still answers True and only
+    `resolve()` fails. The first message blamed a missing `_config.yml`, which
+    sent you looking in the wrong place.
+    """
+    import os
+
+    doomed = tmp_path / "doomed"
+    doomed.mkdir()
+    original = os.getcwd()
+    os.chdir(doomed)
+    try:
+        doomed.rmdir()
+        result = runner.invoke(main, ["build"])
+        assert result.exit_code == 1
+        assert "no longer exists" in result.output
+        assert "cd" in result.output
+        assert "Traceback" not in result.output
+    finally:
+        os.chdir(original)

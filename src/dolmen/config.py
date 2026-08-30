@@ -170,7 +170,20 @@ def load_config(source: Path, overrides: Mapping[str, Any] | None = None) -> Con
     A missing config is not an error — an empty site still builds — but an
     unparseable one is.
     """
-    source = Path(source).resolve()
+    try:
+        source = Path(source).resolve(strict=True)
+    except OSError as exc:
+        # Resolving "." raises when the shell's working directory has been
+        # deleted or renamed underneath it. The directory looks present in the
+        # prompt, so say what actually happened rather than reporting the
+        # config as missing.
+        raise ConfigError(
+            "this directory no longer exists. If it was deleted or renamed while "
+            "your shell was inside it, `cd` to it again (or to somewhere that "
+            "exists) and retry.",
+            source,
+        ) from exc
+
     path = source / CONFIG_NAME
     values: dict[str, Any] = {}
 

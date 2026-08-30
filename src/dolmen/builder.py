@@ -78,6 +78,15 @@ class Builder:
         `dolmen build` in the wrong folder wanted.
         """
         source = Path(source)
+        try:
+            # `is_dir()` still answers True for a deleted working directory —
+            # the inode stays alive while a process holds it as its cwd — so
+            # resolving is the only probe that actually detects it. load_config
+            # raises the accurate error for that case.
+            source = source.resolve(strict=True)
+        except OSError:
+            return cls(load_config(source, overrides), strict=strict)
+
         if not (source / CONFIG_NAME).is_file():
             raise ConfigError(
                 f"no {CONFIG_NAME} here, so this does not look like a dolmen site. "

@@ -127,7 +127,11 @@ def clean(source: Path) -> None:
     """Delete the build output directory."""
     from .config import load_config
 
-    destination = load_config(source).destination
+    try:
+        destination = load_config(source).destination
+    except StaticError as exc:
+        _fail(exc)
+        return
     if destination.exists():
         shutil.rmtree(destination)
         click.secho(f"removed {destination}", fg="green")
