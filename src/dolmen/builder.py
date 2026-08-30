@@ -26,7 +26,7 @@ from typing import Any
 
 import yaml
 
-from .config import CONFIG_NAME, SPECIAL_DIRS, Config, load_config
+from .config import CONFIG_NAME, SPECIAL_DIRS, Config, load_config, looks_like_a_site
 from .exceptions import ConfigError, StaticError
 from .markdown import MarkdownRenderer
 from .models import Document, Site, StaticFile, read_document
@@ -71,11 +71,10 @@ class Builder:
     ) -> Builder:
         """Load the config at `source` and prepare a build.
 
-        A missing `_config.yml` is refused rather than treated as an empty one.
-        Building whatever happens to be in the current directory copies every
-        file it finds into the output — including `.venv`, dotfiles and
-        anything else lying around — which is never what someone running
-        `dolmen build` in the wrong folder wanted.
+        `_config.yml` is optional — every setting has a default. What is not
+        optional is that the directory looks like a site at all: building an
+        arbitrary directory copies every file in it into the output, which is
+        never what someone running `dolmen build` in the wrong folder wanted.
         """
         source = Path(source)
         try:
@@ -87,12 +86,12 @@ class Builder:
         except OSError:
             return cls(load_config(source, overrides), strict=strict)
 
-        if not (source / CONFIG_NAME).is_file():
+        if not looks_like_a_site(source):
             raise ConfigError(
-                f"no {CONFIG_NAME} here, so this does not look like a dolmen site. "
-                f"Run `dolmen new <path>` to create one, use --source to point at an "
-                f"existing site, or add an empty {CONFIG_NAME} if this really is the "
-                f"site root.",
+                "this does not look like a dolmen site — no _config.yml, no _posts/ "
+                "or _layouts/, and nothing with front matter. Run `dolmen new <path>` "
+                "to create one, use --source to point at an existing site, or add an "
+                "empty _config.yml if this really is the site root.",
                 source,
             )
         return cls(load_config(source, overrides), strict=strict)

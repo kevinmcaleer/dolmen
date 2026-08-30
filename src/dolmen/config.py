@@ -164,6 +164,51 @@ class Config(Mapping):
         return data
 
 
+#: Directories whose presence marks a directory as a site even with no config.
+SITE_MARKER_DIRS = ("_posts", "_layouts", "_includes", "_data", "_drafts", "_plugins")
+
+#: Extensions worth opening to look for front matter.
+_CONTENT_SUFFIXES = {".md", ".markdown", ".mkdn", ".mkd", ".html", ".htm"}
+
+#: Never worth walking when deciding whether something is a site.
+_IGNORED_DIRS = {"node_modules", "__pycache__", "venv", "_site", "site-packages"}
+
+
+def looks_like_a_site(source: Path) -> bool:
+    """Whether `source` is plausibly a site root, absent a `_config.yml`.
+
+    A config is optional — defaults are fine — but building a directory that is
+    not a site copies every file in it into the output, so there has to be
+    *some* evidence. Any Jekyll-style directory counts, as does a single file
+    with front matter, which is the smallest real site there is.
+    """
+    source = Path(source)
+    if (source / CONFIG_NAME).is_file():
+        return True
+    if any((source / name).is_dir() for name in SITE_MARKER_DIRS):
+        return True
+
+    # A file with front matter is content; a README in a code repo is not.
+    for path in sorted(source.rglob("*")):
+        if path.suffix.lower() not in _CONTENT_SUFFIXES or not path.is_file():
+            continue
+        parts = path.relative_to(source).parts
+        if any(part.startswith(".") or part in _IGNORED_DIRS for part in parts):
+            continue
+        # Content belonging to a nested site says nothing about this directory —
+        # otherwise a code repo with a demo site in it looks like a site itself.
+        if any((source.joinpath(*parts[:depth]) / CONFIG_NAME).is_file()
+               for depth in range(1, len(parts))):
+            continue
+        try:
+            with path.open(encoding="utf-8") as handle:
+                if handle.readline().rstrip("\r\n") == "---":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def load_config(source: Path, overrides: Mapping[str, Any] | None = None) -> Config:
     """Read `_config.yml` from `source`.
 

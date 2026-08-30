@@ -66,7 +66,7 @@ Jekyll's conventions, unchanged:
 
 | Path | Meaning |
 | --- | --- |
-| `_config.yml` | Site config; every key is readable as `site.*` |
+| `_config.yml` | Site config; every key is readable as `site.*`. Optional — every setting has a default |
 | `_layouts/` | Templates that wrap content |
 | `_includes/` | Partials, called with parameters |
 | `_data/` | YAML/JSON exposed as `site.data.<name>` |
@@ -84,6 +84,17 @@ collections:
     output: true
     permalink: /projects/:name/
 ```
+
+### Do I need a `_config.yml`?
+
+No. Every setting has a default, so a directory with a `_posts/` folder — or a
+single markdown file with front matter — builds as-is.
+
+dolmen does check the directory looks like a site before building, because a
+build copies every file it finds into the output, and doing that to the wrong
+folder is unpleasant. Any of these is enough: a `_config.yml`, one of
+`_posts/`, `_layouts/`, `_includes/`, `_data/`, `_drafts/`, `_plugins/`, or a
+file with front matter. If you are certain, an empty `_config.yml` settles it.
 
 ## Templating: Liquid, same as Jekyll
 

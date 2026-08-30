@@ -161,13 +161,49 @@ def test_baseurl_prefixes_urls_and_relative_url(site: Path):
 def test_building_a_directory_that_is_not_a_site_is_refused(tmp_path: Path):
     """Regression: `dolmen build` in the wrong folder built the whole tree.
 
-    With no `_config.yml` the config was treated as empty and every file in the
-    directory — `.venv`, source code, dotfiles — was copied into `_site`.
+    Every file in the directory — `.venv`, source code, dotfiles — was copied
+    into `_site`. A config is optional, but *some* evidence is not.
     """
     (tmp_path / "notes.txt").write_text("not a site", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# A code repo\n", encoding="utf-8")
     with pytest.raises(StaticError, match="does not look like a dolmen site"):
         Builder.from_source(tmp_path)
     assert not (tmp_path / "_site").exists()
+
+
+def test_no_config_is_fine_when_the_directory_looks_like_a_site(tmp_path: Path):
+    """`_config.yml` is optional — every setting has a default."""
+    posts = tmp_path / "_posts"
+    posts.mkdir()
+    (posts / "2026-01-01-hello.md").write_text(
+        "---\ntitle: Hello\n---\nBody\n", encoding="utf-8"
+    )
+    result = Builder.from_source(tmp_path).build()
+    assert result.documents == 1
+    assert (tmp_path / "_site/2026/01/01/hello.html").is_file()
+
+
+def test_a_single_file_with_front_matter_is_a_site(tmp_path: Path):
+    """The smallest real site there is."""
+    (tmp_path / "index.md").write_text("---\ntitle: Tiny\n---\nJust me.\n", encoding="utf-8")
+    Builder.from_source(tmp_path).build()
+    assert "Just me." in (tmp_path / "_site/index.html").read_text(encoding="utf-8")
+
+
+def test_a_nested_site_does_not_make_its_parent_look_like_one(tmp_path: Path):
+    """Regression: a repo with a demo site inside it passed the check.
+
+    `rglob` found front matter in the nested site and concluded the repo root
+    was itself a site — so building the repo copied its whole tree.
+    """
+    (tmp_path / "README.md").write_text("# A code repo\n", encoding="utf-8")
+    demo = tmp_path / "sandbox" / "demo"
+    demo.mkdir(parents=True)
+    (demo / "_config.yml").write_text("title: Demo\n", encoding="utf-8")
+    (demo / "index.md").write_text("---\ntitle: Home\n---\nHi\n", encoding="utf-8")
+
+    with pytest.raises(StaticError, match="does not look like a dolmen site"):
+        Builder.from_source(tmp_path)
 
 
 def test_an_empty_config_is_still_a_site(tmp_path: Path):
