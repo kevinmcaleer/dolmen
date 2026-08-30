@@ -15,21 +15,50 @@ The published site is still just static files. The front end exists only while y
 ```sh
 git clone https://github.com/kevinmcaleer/dolmen
 cd dolmen
-uv venv && uv pip install -e ".[dev]"
+uv venv                        # creates .venv
+source .venv/bin/activate      # fish: .venv/bin/activate.fish
+uv pip install -e ".[dev]"
 ```
 
-## Use
+`-e` is an editable install: the `dolmen` command runs the code in `src/`, so edits take effect immediately with no reinstall.
+
+Check it worked:
 
 ```sh
-dolmen new mysite          # scaffold a site
-cd mysite
-dolmen serve --open        # build, serve on :4000, rebuild on change
+dolmen --version
+```
+
+## Try it out
+
+`sandbox/` is git-ignored, so anything you build there stays local:
+
+```sh
+dolmen new sandbox/mysite
+cd sandbox/mysite
+dolmen serve --open
+```
+
+That builds the site, serves it at <http://127.0.0.1:4000/>, opens a browser, and rebuilds whenever you save. The build front end is at <http://127.0.0.1:4000/_dolmen/>.
+
+Edit `index.md` or `_posts/*.md` in either the front end or your editor — both trigger a rebuild and reload the page.
+
+## Commands
+
+```sh
+dolmen new PATH            # scaffold a site
+dolmen serve               # build, serve on :4000, rebuild on change
 dolmen build               # one-off build into _site/
 dolmen clean               # delete the output directory
 dolmen doctor              # build and report every warning
 ```
 
-With the server running, the build front end is at <http://127.0.0.1:4000/_dolmen/>.
+Every command except `new` takes `--source` so you can stay at the repo root:
+
+```sh
+dolmen serve --source sandbox/mysite
+```
+
+Useful flags: `--port/-p`, `--drafts` (include `_drafts/`), `--strict` (warnings become errors), `--no-admin`, `--no-reload`.
 
 ## How a site is laid out
 

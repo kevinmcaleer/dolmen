@@ -298,18 +298,18 @@ def serve(
     result = site.build()
 
     if result is None:
-        print(f"build failed: {site.last_error}")
-        print("serving anyway — fix the error and it will rebuild")
+        print(f"build failed: {site.last_error}", flush=True)
+        print("serving anyway — fix the error and it will rebuild", flush=True)
     else:
-        print(f"built {result.documents} document(s) in {result.duration:.2f}s")
+        print(f"built {result.documents} document(s) in {result.duration:.2f}s", flush=True)
         for warning in result.warnings:
-            print(f"  warning: {warning}")
+            print(f"  warning: {warning}", flush=True)
 
     def announce() -> None:
         url = f"http://{host}:{port}/"
-        print(f"serving {site.destination} at {url}")
+        print(f"serving {site.destination} at {url}", flush=True)
         if admin:
-            print(f"build front end at {url}_dolmen/")
+            print(f"build front end at {url}_dolmen/", flush=True)
         if open_browser:
             webbrowser.open(url)
 

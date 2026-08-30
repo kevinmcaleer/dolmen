@@ -1,6 +1,10 @@
 # Build output
 _site/
-.static-cache/
+.dolmen-cache/
+
+# Scratch sites for trying dolmen out. Anything in here is yours and is never
+# committed — `dolmen new sandbox/mysite` is the intended workflow.
+sandbox/
 
 # Python
 __pycache__/
@@ -15,6 +19,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # OS / editor
