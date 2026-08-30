@@ -42,3 +42,22 @@ def test_scaffold_force_writes_into_a_non_empty_directory(tmp_path: Path):
     create_site(tmp_path, force=True)
     assert (tmp_path / "_config.yml").is_file()
     assert (tmp_path / "existing.txt").is_file()
+
+def test_no_template_syntax_leaks_into_the_output(tmp_path: Path):
+    """Regression: a Jinja2 comment `{# … #}` survived the switch to Liquid and
+    rendered as literal text on every page of every new site.
+
+    Liquid silently passes through anything it does not recognise as a tag, so
+    a syntax error from another template language is invisible to the build and
+    only shows up on the page. Assert the output is clean.
+    """
+    create_site(tmp_path / "site", title="Test")
+    Builder.from_source(tmp_path / "site").build()
+
+    leaked = []
+    for page in (tmp_path / "site/_site").rglob("*.html"):
+        text = page.read_text(encoding="utf-8")
+        for marker in ("{#", "#}", "{%", "%}", "{{", "}}"):
+            if marker in text:
+                leaked.append(f"{page.name} contains {marker!r}")
+    assert not leaked, leaked

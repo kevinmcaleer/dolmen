@@ -89,7 +89,7 @@ layout: default
 """
 
 _INCLUDE_HEADER = """\
-{# Parameters arrive as include.*, exactly as they do in Jekyll. #}
+{% comment %}Parameters arrive as include.*, exactly as they do in Jekyll.{% endcomment %}
 <header class="wrap site-header">
   <a class="site-title" href="{{ '/' | relative_url }}">{{ include.title }}</a>
   <nav>
