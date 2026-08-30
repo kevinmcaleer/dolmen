@@ -37,6 +37,14 @@ const api = {
   },
   async problems() { return (await fetch("/_dolmen/api/problems")).json(); },
   async documents() { return (await fetch("/_dolmen/api/documents")).json(); },
+  async preview(path, text) {
+    const r = await fetch("/_dolmen/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, text }),
+    });
+    return r.json();
+  },
   async upload(file) {
     const body = new FormData();
     body.append("file", file);
@@ -50,6 +58,8 @@ const el = (id) => document.getElementById(id);
 const state = {
   editor: null, path: null, dirty: false,
   entries: [], meta: null, report: null, documents: [],
+  previewTimer: null, previewToken: 0, hasMarkers: false,
+  previewFrame: () => el("preview").contentDocument,
 };
 
 /* ---------- chrome ---------- */
@@ -172,9 +182,13 @@ async function openFile(path, line) {
   setDirty(false);
   renderTree();
 
+  clearTemplateError();
   if (file.url) {
     el("preview-url").textContent = file.url;
     el("preview").src = file.url;
+  } else {
+    // No built URL (a layout or include): preview the buffer itself.
+    renderPreview();
   }
 
   renderBacklinks();
@@ -523,6 +537,105 @@ function renderBacklinks() {
   }
 }
 
+
+/* ---------- live preview ----------
+ *
+ * Renders the *unsaved* buffer through the real pipeline and swaps the result
+ * into the preview iframe, keeping the reader's scroll position. Debounced,
+ * and with the in-flight request superseded rather than queued, so holding a
+ * key down does not build a backlog of renders.
+ */
+
+const PREVIEW_DEBOUNCE_MS = 250;
+
+function previewScrollTop() {
+  try {
+    return state.previewFrame().documentElement.scrollTop
+      || state.previewFrame().body.scrollTop
+      || 0;
+  } catch {
+    return 0;                       // cross-origin or not yet loaded
+  }
+}
+
+function restorePreviewScroll(top) {
+  try {
+    const doc = state.previewFrame();
+    doc.documentElement.scrollTop = top;
+    doc.body.scrollTop = top;
+  } catch { /* nothing to restore into */ }
+}
+
+function schedulePreview() {
+  clearTimeout(state.previewTimer);
+  state.previewTimer = setTimeout(renderPreview, PREVIEW_DEBOUNCE_MS);
+}
+
+async function renderPreview() {
+  if (!state.path) return;
+
+  const token = ++state.previewToken;
+  const text = state.editor.getValue();
+
+  let result;
+  try {
+    result = await api.preview(state.path, text);
+  } catch (error) {
+    return;                         // a failed preview must never block typing
+  }
+  if (token !== state.previewToken) return;   // superseded by a later keystroke
+
+  if (result.error) {
+    showTemplateError(result.error);
+    return;
+  }
+  clearTemplateError();
+
+  const scroll = previewScrollTop();
+  const frame = el("preview");
+  try {
+    const doc = state.previewFrame();
+    doc.open();
+    doc.write(result.html);
+    doc.close();
+    restorePreviewScroll(scroll);
+  } catch {
+    frame.srcdoc = result.html;
+  }
+}
+
+/* ---------- template errors as editor markers ---------- */
+
+// "path:12:3: message" or "path: message" — pull out a line if there is one.
+const ERROR_LINE_RE = /:(\d+)(?::(\d+))?\b/;
+
+function showTemplateError(message) {
+  setStatus("template error", "bad");
+
+  const match = ERROR_LINE_RE.exec(message);
+  const line = match ? Number(match[1]) : 1;
+  const column = match && match[2] ? Number(match[2]) : 1;
+
+  monaco.editor.setModelMarkers(state.editor.getModel(), "dolmen", [
+    {
+      severity: monaco.MarkerSeverity.Error,
+      message: message.replace(/^.*?:\s*/, ""),
+      startLineNumber: line,
+      endLineNumber: line,
+      startColumn: column,
+      endColumn: column + 1,
+    },
+  ]);
+  state.hasMarkers = true;
+}
+
+function clearTemplateError() {
+  if (!state.hasMarkers) return;
+  monaco.editor.setModelMarkers(state.editor.getModel(), "dolmen", []);
+  state.hasMarkers = false;
+  setStatus("ready", "ok");
+}
+
 /* ---------- boot ---------- */
 
 require.config({
@@ -544,6 +657,7 @@ require(["vs/editor/editor.main"], async () => {
 
   state.editor.onDidChangeModelContent(() => {
     if (!state.dirty) setDirty(true);
+    schedulePreview();
   });
   state.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
 

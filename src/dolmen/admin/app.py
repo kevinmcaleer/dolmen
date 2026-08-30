@@ -244,6 +244,24 @@ def admin_routes(site: DevSite) -> list[Route]:
             {"documents": sorted(payload, key=lambda d: (d["title"] or d["path"]).lower())}
         )
 
+    async def preview(request: Request) -> Response:
+        """Render an unsaved buffer, without writing anything to disk.
+
+        The editor posts what it currently holds and gets the finished page
+        back. Nothing touches the file system, so a preview of a half-typed
+        document never becomes the published site.
+        """
+        payload = await request.json()
+        try:
+            path = resolve(payload.get("path", ""))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        html, error = site.render_preview(path, payload.get("text", ""))
+        if error is not None:
+            return JSONResponse({"error": error}, status_code=200)
+        return JSONResponse({"html": html})
+
     async def problems(request: Request) -> JSONResponse:
         """Everything wrong with the site, for the problems panel."""
         return JSONResponse(site.problems())
@@ -286,6 +304,7 @@ def admin_routes(site: DevSite) -> list[Route]:
         Route("/api/build", rebuild, methods=["POST"]),
         Route("/api/problems", problems),
         Route("/api/documents", documents),
+        Route("/api/preview", preview, methods=["POST"]),
         Route("/assets/{path:path}", asset),
     ]
 

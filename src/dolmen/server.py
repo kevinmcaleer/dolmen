@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import mimetypes
 import threading
 import webbrowser
@@ -47,15 +48,49 @@ from .exceptions import StaticError
 LIVE_RELOAD_SNIPPET = """
 <script>
 (() => {
+  const KEY = "dolmen:scroll:" + location.pathname;
+
+  // Put the reader back where they were. A rebuild that scrolls a long page to
+  // the top is worse than no live reload at all.
+  const saved = sessionStorage.getItem(KEY);
+  if (saved !== null) {
+    sessionStorage.removeItem(KEY);
+    addEventListener("load", () => window.scrollTo(0, Number(saved)));
+  }
+
+  // A stylesheet change needs no reload — re-request it and the page repaints
+  // with the scroll position, form state and open details all intact.
+  const reloadStyles = () => {
+    for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+      const url = new URL(link.href, location.href);
+      url.searchParams.set("_dolmen", Date.now());
+      link.href = url.href;
+    }
+  };
+
   let current = null;
   const source = new EventSource("/_dolmen/events");
   source.addEventListener("build", (event) => {
-    if (current !== null && event.data !== current) location.reload();
-    current = event.data;
+    let payload;
+    try { payload = JSON.parse(event.data); } catch { payload = { version: event.data }; }
+    if (current !== null && payload.version !== current) {
+      if (payload.cssOnly) {
+        reloadStyles();
+      } else {
+        sessionStorage.setItem(KEY, String(window.scrollY));
+        location.reload();
+      }
+    }
+    current = payload.version;
   });
 })();
 </script>
 """
+
+
+#: Extensions that only affect presentation, so the browser can re-request the
+#: stylesheet instead of reloading and losing the reader's place.
+STYLE_SUFFIXES = (".css", ".scss", ".sass")
 
 
 @dataclass
@@ -63,21 +98,22 @@ class ReloadChannel:
     """Fan-out of build notifications to every connected browser."""
 
     version: int = 0
-    _subscribers: set[asyncio.Queue[int]] = field(default_factory=set)
+    _subscribers: set[asyncio.Queue[dict[str, Any]]] = field(default_factory=set)
 
-    def subscribe(self) -> asyncio.Queue[int]:
-        queue: asyncio.Queue[int] = asyncio.Queue()
+    def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._subscribers.add(queue)
-        queue.put_nowait(self.version)
+        queue.put_nowait({"version": self.version, "cssOnly": False})
         return queue
 
-    def unsubscribe(self, queue: asyncio.Queue[int]) -> None:
+    def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
 
-    def publish(self) -> None:
+    def publish(self, *, css_only: bool = False) -> None:
         self.version += 1
+        message = {"version": self.version, "cssOnly": css_only}
         for queue in self._subscribers:
-            queue.put_nowait(self.version)
+            queue.put_nowait(message)
 
 
 class DevSite:
@@ -98,6 +134,75 @@ class DevSite:
     @property
     def destination(self) -> Path:
         return load_config(self.source, self.overrides).destination
+
+    def render_preview(self, path: Path, text: str) -> tuple[str, str | None]:
+        """Render `text` as if it were the contents of `path`.
+
+        Runs the real pipeline — front matter, Liquid, markdown, the layout
+        chain — against the last build's site model, so the page looks exactly
+        as it will once saved. Nothing is written; the site model is restored
+        afterwards, or a preview would leak into the next build.
+        """
+        from . import frontmatter
+        from .config import load_config
+        from .markdown import MarkdownRenderer
+        from .templating import Templating
+
+        if self.last_site is None:
+            return "", "nothing has been built yet"
+
+        # Documents hold resolved paths, and on macOS /var and /private/var are
+        # the same directory by two names.
+        path = Path(path).resolve()
+        document = next(
+            (d for d in self.last_site.documents if d.source.resolve() == path), None
+        )
+        if document is None:
+            return "", None if not text else "that file is not a document in this site"
+
+        config = load_config(self.source, self.overrides)
+        parsed = frontmatter.split(text, path)
+
+        original = (document.metadata, document.body, document.content)
+        try:
+            document.metadata = {**original[0], **parsed.metadata}
+            document.body = parsed.content
+
+            markdown = MarkdownRenderer(
+                link_resolver=lambda target: _preview_resolver(self.last_site, target)
+            )
+            templating = Templating(
+                self.source,
+                markdown=markdown,
+                baseurl=config.baseurl,
+                url=config.url,
+            )
+            context = {
+                "site": self.last_site.to_template_dict(),
+                "page": document.to_template_dict(),
+                "content": "",
+            }
+            body = templating.render_string(
+                document.body, context, name=str(path)
+            )
+            if document.is_markdown:
+                body = markdown.render(body)
+            document.content = body
+            context["page"] = document.to_template_dict()
+
+            layout = document.layout
+            html = (
+                templating.render_layout(layout, body, context, name=str(path))
+                if layout
+                else body
+            )
+            return html, None
+        except StaticError as exc:
+            return "", str(exc)
+        except Exception as exc:  # noqa: BLE001 - a preview must never kill the server
+            return "", f"{type(exc).__name__}: {exc}"
+        finally:
+            document.metadata, document.body, document.content = original
 
     def problems(self) -> dict[str, Any]:
         """Validate the last build, for the front end's problems panel."""
@@ -133,6 +238,17 @@ class DevSite:
         return self.last_result
 
 
+def _preview_resolver(site: Any, target: str) -> str | None:
+    """Resolve a wiki link during preview, without rebuilding the index."""
+    from .links import anchor_for, split_target
+
+    page, heading = split_target(target)
+    document = site.find_by_title(page)
+    if document is None:
+        return None
+    return f"{document.url}#{anchor_for(heading)}" if heading else document.url
+
+
 def create_app(
     site: DevSite,
     *,
@@ -148,8 +264,8 @@ def create_app(
         async def stream() -> Any:
             try:
                 while True:
-                    version = await queue.get()
-                    yield f"event: build\ndata: {version}\n\n"
+                    message = await queue.get()
+                    yield f"event: build\ndata: {json.dumps(message)}\n\n"
             except asyncio.CancelledError:  # client went away
                 raise
             finally:
@@ -291,9 +407,13 @@ async def _watch(site: DevSite, stop: asyncio.Event) -> None:
             or path.endswith(("~", ".swp", ".tmp"))
         )
 
-    async for _ in awatch(
+    async for changes in awatch(
         site.source, watch_filter=lambda c, p: not ignore(c, p), stop_event=stop
     ):
+        changed = [path for _, path in changes]
+        css_only = bool(changed) and all(
+            path.lower().endswith(STYLE_SUFFIXES) for path in changed
+        )
         result = site.build()
         if result is not None:
             print(
@@ -302,7 +422,7 @@ async def _watch(site: DevSite, stop: asyncio.Event) -> None:
             )
         else:
             print(f"  build failed: {site.last_error}", flush=True)
-        site.reload.publish()
+        site.reload.publish(css_only=css_only and site.last_error is None)
 
 
 def serve(
