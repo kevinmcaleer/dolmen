@@ -9,16 +9,30 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+        with:
+          enable-cache: true
+
+      # A venv per matrix entry: `--system` targets the runner's own Python,
+      # which is externally managed and rejects the install.
       - name: Install
-        run: uv pip install --system -e ".[dev]"
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv pip install -e ".[dev]"
+
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
+
       - name: Test
-        run: pytest
+        run: uv run pytest
+
+      - name: Smoke test the CLI
+        run: |
+          uv run dolmen new /tmp/smoke
+          uv run dolmen build --source /tmp/smoke --strict
+          test -f /tmp/smoke/_site/index.html
