@@ -1,6 +1,6 @@
 # dolmen
 
-A static site generator written in Python, built to feel like Jekyll without needing Ruby — and with a **web front end for building the site**, so pages can be written in a browser with a live preview instead of a text editor and a terminal.
+A static site generator written in Python that runs **Jekyll's own Liquid templates** without needing Ruby — and adds a **web front end for building the site**, so pages can be written in a browser with a live preview instead of a text editor and a terminal.
 
 > **Status: early.** The build pipeline works end to end and is covered by tests. The web front end runs and can create, edit, save and upload — it is the current focus. See the open issues for what's next.
 
@@ -56,41 +56,33 @@ collections:
     permalink: /projects/:name/
 ```
 
-## Templating: Jinja2, not Liquid
+## Templating: Liquid, same as Jekyll
 
-This is the one deliberate incompatibility, and the one that matters most when porting a site.
+dolmen renders with **Liquid** — the same template language Jekyll uses — via [`python-liquid`](https://github.com/jg-rp/liquid). Your existing templates run unmodified:
 
-`dolmen` uses **Jinja2**. The variables (`site`, `page`, `content`) and the filter names (`relative_url`, `date_to_string`, `where`, `group_by`, `markdownify`, `slugify`, …) match Jekyll, so most expressions port unchanged:
-
-```jinja
+```liquid
+{% assign recent = site.posts %}
 {{ page.title }}
 {{ '/assets/css/main.css' | relative_url }}
-{% for post in site.posts %}{{ post.title }}{% endfor %}
+{% for post in recent %}{% include card.html title=post.title %}{% endfor %}
 ```
 
-Three things differ:
+`assign`, `capture`, `unless`, `case`, `for`/`forloop`, `if`/`elsif`, `comment` — all present. So are Jekyll's filters: `relative_url`, `absolute_url`, `where`, `where_exp`, `group_by`, `sort_by`, `markdownify`, `slugify`, `jsonify`, `number_of_words`, `array_to_sentence_string`, `xml_escape`, `uri_escape`, `date_to_string`, `date_to_xmlschema` and the rest.
 
-**Filter arguments use parentheses**, not colons.
+**Layouts wrap, they don't inherit.** A layout receives the rendered document as `content`. A layout with its own `layout:` in front matter nests inside that one, up the chain — same as Jekyll.
+
+### The one known incompatibility
+
+python-liquid's expression lexer reserves about twenty words, so a reserved word can't follow a dot:
 
 ```liquid
-{{ page.date | date: "%Y" }}     {# Jekyll #}
-```
-```jinja
-{{ page.date | date('%Y') }}     {# dolmen #}
+{{ include.cols }}      {# fails: "expected an identifier, found cols" #}
+{{ include["cols"] }}   {# works #}
 ```
 
-**Includes are called, and take keyword arguments.** Jinja2's `{% include %}` can't take parameters, so includes are a function; inside the include, arguments read off `include.*` as they do in Liquid, and the caller's `site` and `page` are still in scope.
+Affected: `cols offset limit with as in for if else and or not true false nil empty blank contains reversed continue`. Jekyll accepts all of these, so a migrated site may need a handful of rewrites — on kevsrobots.com, nine across ~1,900 Liquid tags.
 
-```liquid
-{% include card.html title="Hi" cols=3 %}          {# Jekyll #}
-```
-```jinja
-{{ include('card.html', title='Hi', cols=3) }}     {# dolmen #}
-```
-
-**Layouts wrap, they don't inherit.** A layout receives the rendered document as `content` and needs no `{% block %}`. A layout with its own `layout:` in front matter nests inside that one, up the chain — same as Jekyll.
-
-Liquid tags with no Jinja2 equivalent (`{% assign %}`, `{% capture %}`) become `{% set %}` and `{% set … %}…{% endset %}`.
+Not yet implemented: Jekyll's own `{% highlight %}`, `{% link %}`, `{% post_url %}` and `{% seo %}` tags, and kramdown inline attribute lists (`{:class="cover"}`).
 
 ## Wiki links
 
@@ -128,10 +120,12 @@ Kramdown's inline attribute lists (`{:class="cover"}`) are not supported; the `a
 
 ```sh
 uv pip install -e ".[dev]"
-pytest                                              # all tests
+pytest --cov                                        # tests, with the 80% coverage gate
 pytest tests/test_builder.py::test_wiki_links_resolve_by_title   # one test
 ruff check .                                        # lint
 ```
+
+New features ship with tests; coverage must stay at or above 80% and CI enforces it.
 
 ## Name
 

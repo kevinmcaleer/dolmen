@@ -49,16 +49,16 @@ _LAYOUT_DEFAULT = """\
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
-  <meta name="description" content="{{ page.description | default(site.description) }}">
+  <meta name="description" content="{{ page.description | default: site.description }}">
   <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
 </head>
 <body>
-  {{ include('header.html', title=site.title) }}
+  {% include header.html title=site.title %}
   <main class="wrap">
     {{ content }}
   </main>
   <footer class="wrap">
-    <p>&copy; {{ site.time | date('%Y') }} {{ site.title }} · built with dolmen</p>
+    <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }} · built with dolmen</p>
   </footer>
 </body>
 </html>
@@ -144,7 +144,7 @@ tags:
 This is your first post. It lives in `_posts/` and its filename sets the date.
 
 ```python
-print("Markdown, Jinja2 templating, and Jekyll conventions.")
+print("Markdown, Liquid templating, and Jekyll conventions.")
 ```
 
 Wiki links resolve by title: [[About]].

@@ -8,7 +8,7 @@ The order matters and is worth stating once:
    defaults, fill in front matter the author left out.
 3. **Assign URLs** — needed before rendering, because documents link to each
    other and wiki links resolve against the finished URL map.
-4. **Render** — body through Jinja2, then markdown, then up the layout chain.
+4. **Render** — body through Liquid, then markdown, then up the layout chain.
 5. **Write** — documents to their permalink paths, static files copied.
 
 Steps 3 and 4 are separate passes for a reason: a template that loops over
@@ -34,7 +34,7 @@ from .permalinks import apply as apply_permalink
 from .plugins import PluginManager
 from .templating import Templating
 
-#: Files whose body is run through Jinja2 even though they are not markdown.
+#: Files whose body is run through Liquid even though they are not markdown.
 TEMPLATED_EXTENSIONS = {".html", ".htm", ".xml", ".json", ".txt", ".css"}
 
 

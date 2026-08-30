@@ -30,14 +30,14 @@ defaults:
 LAYOUT_DEFAULT = """\
 <!DOCTYPE html>
 <html><head><title>{{ page.title }}</title></head>
-<body>{{ include('nav.html', label='Menu') }}<main>{{ content }}</main></body></html>
+<body>{% include nav.html label="Menu" %}<main>{{ content }}</main></body></html>
 """
 
 LAYOUT_POST = """\
 ---
 layout: default
 ---
-<article data-date="{{ page.date | date('%Y-%m-%d') }}">{{ content }}</article>
+<article data-date="{{ page.date | date: '%Y-%m-%d' }}">{{ content }}</article>
 """
 
 INCLUDE_NAV = """\

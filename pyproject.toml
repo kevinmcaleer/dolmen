@@ -8,15 +8,15 @@ build-backend = "hatchling.build"
 # CLI are both `dolmen`.
 name = "dolmen-ssg"
 version = "0.1.0"
-description = "A Jekyll-compatible static site generator written in Python, with a web front end for building the site."
+description = "A Jekyll-compatible static site generator written in Python — Liquid templates, no Ruby — with a web front end for building the site."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Kevin McAleer", email = "kevinmcaleer@gmail.com" }]
-keywords = ["static-site-generator", "jekyll", "markdown", "jinja2"]
+keywords = ["static-site-generator", "jekyll", "markdown", "liquid"]
 
 dependencies = [
-    "Jinja2>=3.1",
+    "python-liquid>=2.3",
     "PyYAML>=6.0",
     "markdown-it-py>=3.0",
     "mdit-py-plugins>=0.4",
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
+dev = ["pytest>=8.0", "ruff>=0.5", "httpx2"]
 
 [project.scripts]
 dolmen = "dolmen.cli:main"
