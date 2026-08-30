@@ -124,6 +124,17 @@ Affected: `cols offset limit with as in for if else and or not true false nil em
 
 Not yet implemented: Jekyll's own `{% highlight %}`, `{% link %}`, `{% post_url %}` and `{% seo %}` tags, and kramdown inline attribute lists (`{:class="cover"}`).
 
+## The build front end
+
+`dolmen serve` mounts an editor at `/_dolmen/`:
+
+- **Live preview** — the preview updates as you type, from the unsaved buffer. Nothing is written until you save, scroll position survives a rebuild, and a stylesheet change repaints without reloading the page.
+- **Problems panel** — everything wrong with the site, each with a "why it matters".
+- **Structure drawer** — navigation and data files as reorderable rows rather than YAML; layouts and includes with who uses them and which `include.*` parameters they read; a form for adding a collection.
+- **Images** — drag one in and it is stored, resized and linked.
+
+It is development-only, and never written into the built site.
+
 ## Checking a site
 
 `dolmen doctor` reports every problem it can find, and the front end shows the
@@ -143,10 +154,24 @@ non-zero on errors, or on warnings too with `--strict` — useful in CI.
 Any document can reference another by title, with no path:
 
 ```markdown
-See [[Getting Started]] and [[Getting Started|the setup guide]].
+See [[Getting Started]], [[Getting Started|the setup guide]],
+and [[Getting Started#Installing]].
 ```
 
-Targets resolve against document titles, then slugs, then filenames. An unresolved link still renders, marked `.wikilink-broken`, so a typo is visible on the page rather than silent.
+Targets resolve in order: exact title, slugified title, the document's own slug, then filename. An unresolved link still renders, marked `.wikilink-broken`, so a typo is visible on the page rather than silent.
+
+**Backlinks** come for free. Every document knows what links to it, as `page.backlinks`:
+
+```liquid
+{% if page.backlinks %}
+  <h2>Linked from</h2>
+  {% for source in page.backlinks %}
+    <a href="{{ source.url }}">{{ source.title }}</a>
+  {% endfor %}
+{% endif %}
+```
+
+In the front end, typing `[[` completes on document titles and `[[Page#` on that page's headings; backlinks for the open file appear under the editor.
 
 ## Plugins
 

@@ -19,6 +19,8 @@
     Problems
     <span class="badge__counts" id="badge-counts"><span class="badge__ok">✓</span></span>
   </button>
+  <button id="structure-btn" class="btn" aria-expanded="false"
+          title="Navigation, data files, layouts and includes">Structure</button>
   <button id="new-btn" class="btn">New</button>
   <button id="build-btn" class="btn">Rebuild</button>
   <button id="save-btn" class="btn btn-primary" disabled>Save</button>
@@ -51,7 +53,20 @@
     </div>
     <iframe id="preview" class="preview" src="/" title="Live preview"></iframe>
   </section>
-</main>
+<section class="structure" id="structure" hidden aria-label="Site structure">
+  <header class="structure__head">
+    <strong>Structure</strong>
+    <nav class="structure__tabs" id="structure-tabs">
+      <button class="structure__tab is-active" data-tab="data">Navigation &amp; data</button>
+      <button class="structure__tab" data-tab="layouts">Layouts</button>
+      <button class="structure__tab" data-tab="includes">Includes</button>
+      <button class="structure__tab" data-tab="collections">Collections</button>
+    </nav>
+    <span class="spacer"></span>
+    <button class="btn btn-quiet" id="structure-close" title="Close (Esc)">&times;</button>
+  </header>
+  <div class="structure__body" id="structure-body"></div>
+</section>
 
 <section class="problems" id="problems" hidden aria-label="Site problems">
   <header class="problems__head">
@@ -63,6 +78,7 @@
   </header>
   <ul class="problems__list" id="problems-list"></ul>
 </section>
+</main>
 
 <dialog id="new-dialog">
   <form method="dialog" id="new-form">

@@ -244,6 +244,79 @@ def admin_routes(site: DevSite) -> list[Route]:
             {"documents": sorted(payload, key=lambda d: (d["title"] or d["path"]).lower())}
         )
 
+    async def structure(request: Request) -> JSONResponse:
+        """Layouts, includes and data files, with how they are used."""
+        from ..config import load_config
+        from ..structure import data_files, includes, layouts
+
+        site_model = site.last_site
+        config = load_config(site.source, site.overrides)
+        if site_model is None:
+            return JSONResponse({"layouts": [], "includes": [], "data": []})
+
+        return JSONResponse(
+            {
+                "layouts": [u.to_dict() for u in layouts(site_model, config)],
+                "includes": [u.to_dict() for u in includes(site_model, config)],
+                "data": [d.to_dict() for d in data_files(config)],
+                "collections": sorted(config.collections),
+            }
+        )
+
+    async def write_data(request: Request) -> JSONResponse:
+        """Save a `_data/` sequence, preserving the author's key order."""
+        from ..structure import dump_sequence
+
+        payload = await request.json()
+        try:
+            path = resolve(payload.get("path", ""))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+            return JSONResponse({"error": "rows must be a list of mappings"}, status_code=400)
+        if path.suffix.lower() not in {".yml", ".yaml"}:
+            return JSONResponse({"error": "not a YAML data file"}, status_code=415)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dump_sequence(rows), encoding="utf-8")
+        site.build()
+        site.reload.publish()
+        return JSONResponse({"saved": True, "error": site.last_error})
+
+    async def create_collection(request: Request) -> JSONResponse:
+        """Add a `collections:` entry and create its directory."""
+        import yaml as _yaml
+
+        payload = await request.json()
+        name = str(payload.get("name") or "").strip()
+        if not name.replace("_", "").isalnum():
+            return JSONResponse(
+                {"error": "a collection name must be letters, numbers or underscores"},
+                status_code=400,
+            )
+
+        config_path = site.source / "_config.yml"
+        raw = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+        loaded = _yaml.safe_load(raw) or {}
+        collections = loaded.setdefault("collections", {})
+        if name in collections:
+            return JSONResponse({"error": f"{name} already exists"}, status_code=409)
+
+        collections[name] = {
+            "output": bool(payload.get("output", True)),
+            "permalink": str(payload.get("permalink") or f"/{name}/:name/"),
+        }
+        config_path.write_text(
+            _yaml.safe_dump(loaded, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+        (site.source / f"_{name}").mkdir(exist_ok=True)
+
+        site.build()
+        site.reload.publish()
+        return JSONResponse({"created": name, "directory": f"_{name}", "error": site.last_error})
+
     async def preview(request: Request) -> Response:
         """Render an unsaved buffer, without writing anything to disk.
 
@@ -305,6 +378,9 @@ def admin_routes(site: DevSite) -> list[Route]:
         Route("/api/problems", problems),
         Route("/api/documents", documents),
         Route("/api/preview", preview, methods=["POST"]),
+        Route("/api/structure", structure),
+        Route("/api/data", write_data, methods=["POST"]),
+        Route("/api/collection", create_collection, methods=["POST"]),
         Route("/assets/{path:path}", asset),
     ]
 

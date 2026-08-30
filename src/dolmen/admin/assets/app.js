@@ -37,6 +37,25 @@ const api = {
   },
   async problems() { return (await fetch("/_dolmen/api/problems")).json(); },
   async documents() { return (await fetch("/_dolmen/api/documents")).json(); },
+  async structure() { return (await fetch("/_dolmen/api/structure")).json(); },
+  async saveData(path, rows) {
+    const r = await fetch("/_dolmen/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, rows }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    return r.json();
+  },
+  async createCollection(payload) {
+    const r = await fetch("/_dolmen/api/collection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    return r.json();
+  },
   async preview(path, text) {
     const r = await fetch("/_dolmen/api/preview", {
       method: "POST",
@@ -59,6 +78,8 @@ const state = {
   editor: null, path: null, dirty: false,
   entries: [], meta: null, report: null, documents: [],
   previewTimer: null, previewToken: 0, hasMarkers: false,
+  ready: false, pendingOpen: null,
+  structure: null, structureTab: "data", dragIndex: null,
   previewFrame: () => el("preview").contentDocument,
 };
 
@@ -164,6 +185,11 @@ const LANGUAGES = {
 };
 
 async function openFile(path, line) {
+  if (!state.ready) {
+    // Clicked before Monaco arrived; open it as soon as it does.
+    state.pendingOpen = path;
+    return;
+  }
   if (state.dirty && !confirm("Discard unsaved changes?")) return;
 
   let file;
@@ -201,7 +227,7 @@ async function openFile(path, line) {
 }
 
 async function saveFile() {
-  if (!state.path || !state.dirty) return;
+  if (!state.ready || !state.path || !state.dirty) return;
   setStatus("saving…");
   try {
     const result = await api.write(state.path, state.editor.getValue());
@@ -215,6 +241,7 @@ async function saveFile() {
       refreshTree();
       refreshProblems();
       refreshDocuments();
+      state.structure = null;
     }
   } catch (error) {
     setStatus("save failed", "bad");
@@ -567,6 +594,7 @@ function restorePreviewScroll(top) {
 }
 
 function schedulePreview() {
+  if (!state.ready) return;
   clearTimeout(state.previewTimer);
   state.previewTimer = setTimeout(renderPreview, PREVIEW_DEBOUNCE_MS);
 }
@@ -636,13 +664,373 @@ function clearTemplateError() {
   setStatus("ready", "ok");
 }
 
-/* ---------- boot ---------- */
+
+/* ---------- structure ----------
+ *
+ * Navigation and data files as reorderable rows rather than raw YAML; layouts
+ * and includes with who uses them and what parameters they take.
+ *
+ * Rows are saved through /api/data, which re-serialises with sort_keys=False —
+ * so moving one nav item produces a one-line diff, not a reflowed file.
+ */
+
+function tabButtons() {
+  return [...document.querySelectorAll(".structure__tab")];
+}
+
+async function openStructure(tab) {
+  const panel = el("structure");
+  panel.hidden = false;
+  el("structure-btn").setAttribute("aria-expanded", "true");
+  if (!state.structure) state.structure = await api.structure();
+  showStructureTab(tab || state.structureTab || "data");
+}
+
+function closeStructure() {
+  el("structure").hidden = true;
+  el("structure-btn").setAttribute("aria-expanded", "false");
+}
+
+function showStructureTab(tab) {
+  state.structureTab = tab;
+  for (const button of tabButtons()) {
+    button.classList.toggle("is-active", button.dataset.tab === tab);
+  }
+  const body = el("structure-body");
+  body.replaceChildren();
+
+  if (tab === "data") renderDataTab(body);
+  else if (tab === "layouts") renderUses(body, state.structure.layouts, "layout");
+  else if (tab === "includes") renderUses(body, state.structure.includes, "include");
+  else renderCollectionsTab(body);
+}
+
+/* ---- navigation and data files ---- */
+
+function renderDataTab(body) {
+  const files = (state.structure.data || []).filter((f) => f.shape === "sequence");
+  if (!files.length) {
+    body.append(hint("No list-style data files in _data/ yet."));
+    return;
+  }
+  for (const file of files) {
+    const heading = document.createElement("h3");
+    heading.textContent = file.name.replace(/\.(ya?ml)$/, "");
+    heading.style.margin = "0 0 .15rem";
+    heading.style.fontSize = "13px";
+    body.append(heading, fileLabel(file.path));
+    body.append(rowsEditor(file));
+  }
+}
+
+function hint(text) {
+  const p = document.createElement("p");
+  p.className = "structure__hint";
+  p.textContent = text;
+  return p;
+}
+
+function fileLabel(path) {
+  const p = document.createElement("p");
+  p.className = "structure__file";
+  p.textContent = path;
+  return p;
+}
+
+function rowsEditor(file) {
+  const wrap = document.createElement("div");
+  const list = document.createElement("div");
+  list.className = "rows";
+  wrap.append(list);
+
+  // Work on a copy; nothing is written until Save.
+  let rows = file.rows.map((row) => ({ ...row }));
+  const columns = file.columns.length ? file.columns : ["name", "link"];
+
+  const draw = () => {
+    list.replaceChildren();
+    rows.forEach((row, index) => list.append(rowElement(row, index)));
+  };
+
+  const rowElement = (row, index) => {
+    const el_ = document.createElement("div");
+    el_.className = "row";
+    el_.draggable = true;
+
+    const grip = document.createElement("span");
+    grip.className = "row__grip";
+    grip.textContent = "\u2630";
+    grip.title = "Drag to reorder";
+
+    const fields = document.createElement("div");
+    fields.className = "row__fields";
+    for (const column of columns) {
+      const field = document.createElement("div");
+      field.className = "row__field";
+      const label = document.createElement("label");
+      label.textContent = column;
+      const input = document.createElement("input");
+      input.value = row[column] ?? "";
+      input.oninput = () => { row[column] = input.value; };
+      field.append(label, input);
+      fields.append(field);
+    }
+
+    const remove = document.createElement("button");
+    remove.className = "row__remove";
+    remove.textContent = "\u00d7";
+    remove.title = "Remove";
+    remove.onclick = () => { rows.splice(index, 1); draw(); };
+
+    el_.addEventListener("dragstart", (event) => {
+      state.dragIndex = index;
+      el_.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+    el_.addEventListener("dragend", () => el_.classList.remove("is-dragging"));
+    el_.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      el_.classList.add("is-over");
+    });
+    el_.addEventListener("dragleave", () => el_.classList.remove("is-over"));
+    el_.addEventListener("drop", (event) => {
+      event.preventDefault();
+      el_.classList.remove("is-over");
+      const from = state.dragIndex;
+      if (from === index || from == null) return;
+      const [moved] = rows.splice(from, 1);
+      rows.splice(index, 0, moved);
+      draw();
+    });
+
+    el_.append(grip, fields, remove);
+    return el_;
+  };
+
+  const actions = document.createElement("div");
+  actions.className = "structure__actions";
+
+  const add = document.createElement("button");
+  add.className = "btn";
+  add.textContent = "Add row";
+  add.onclick = () => {
+    rows.push(Object.fromEntries(columns.map((c) => [c, ""])));
+    draw();
+  };
+
+  const save = document.createElement("button");
+  save.className = "btn btn-primary";
+  save.textContent = "Save";
+  save.onclick = async () => {
+    try {
+      const result = await api.saveData(file.path, rows);
+      toast(result.error ? result.error : `Saved ${file.path}`, Boolean(result.error));
+      state.structure = await api.structure();
+      refreshProblems();
+    } catch (error) {
+      toast(String(error.message || error), true);
+    }
+  };
+
+  const edit = document.createElement("button");
+  edit.className = "btn";
+  edit.textContent = "Edit as YAML";
+  edit.onclick = () => { closeStructure(); openFile(file.path); };
+
+  actions.append(add, save, edit);
+  draw();
+  wrap.append(actions);
+  return wrap;
+}
+
+/* ---- layouts and includes ---- */
+
+function renderUses(body, uses, kind) {
+  if (!uses || !uses.length) {
+    body.append(hint(`No ${kind}s yet.`));
+    return;
+  }
+  body.append(
+    hint(
+      kind === "include"
+        ? "Parameters are the include.* names each file reads, so you can call it without opening it."
+        : "Layouts nest: a layout's own layout: counts as a use.",
+    ),
+  );
+
+  const list = document.createElement("ul");
+  list.className = "uses";
+
+  for (const use of uses) {
+    const item = document.createElement("li");
+    item.className = use.count ? "use" : "use use--unused";
+
+    const name = document.createElement("div");
+    name.className = "use__name";
+    const open = document.createElement("button");
+    open.textContent = use.name;
+    open.title = `Open ${use.path}`;
+    open.onclick = () => { closeStructure(); openFile(use.path); };
+    name.append(open);
+
+    const meta = document.createElement("div");
+    meta.className = "use__meta";
+    meta.textContent = use.count
+      ? `used by ${use.count} file${use.count === 1 ? "" : "s"}`
+      : "not used anywhere";
+
+    item.append(name, meta);
+
+    if (use.parameters?.length) {
+      const params = document.createElement("div");
+      params.className = "use__params";
+      for (const parameter of use.parameters) {
+        const chip = document.createElement("span");
+        chip.className = "use__param";
+        chip.textContent = parameter;
+        params.append(chip);
+      }
+      item.append(params);
+    }
+
+    if (use.count) {
+      const usedBy = document.createElement("ul");
+      usedBy.className = "use__usedby";
+      for (const path of use.used_by) {
+        const li = document.createElement("li");
+        const link = document.createElement("button");
+        link.textContent = path;
+        link.onclick = () => { closeStructure(); openFile(path); };
+        li.append(link);
+        usedBy.append(li);
+      }
+      item.append(usedBy);
+    }
+    list.append(item);
+  }
+  body.append(list);
+}
+
+/* ---- collections ---- */
+
+function renderCollectionsTab(body) {
+  const existing = document.createElement("p");
+  existing.className = "structure__hint";
+  existing.textContent = `Current: ${(state.structure.collections || []).join(", ")}`;
+  body.append(existing);
+
+  const form = document.createElement("form");
+  form.className = "structure__form";
+
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Name";
+  const name = document.createElement("input");
+  name.required = true;
+  name.placeholder = "projects";
+  nameLabel.append(name);
+
+  const permalinkLabel = document.createElement("label");
+  permalinkLabel.textContent = "Permalink";
+  const permalink = document.createElement("input");
+  permalink.placeholder = "/projects/:name/";
+  permalinkLabel.append(permalink);
+
+  const submit = document.createElement("button");
+  submit.className = "btn btn-primary";
+  submit.textContent = "Create collection";
+
+  form.append(nameLabel, permalinkLabel, submit);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const result = await api.createCollection({
+        name: name.value.trim(),
+        permalink: permalink.value.trim() || undefined,
+      });
+      toast(`Created ${result.directory}/`);
+      state.structure = await api.structure();
+      showStructureTab("collections");
+      refreshTree();
+    } catch (error) {
+      toast(String(error.message || error), true);
+    }
+  };
+  body.append(form);
+}
+
+/* ---------- boot ----------
+ *
+ * Split in two on purpose. Monaco comes from a CDN, and everything wired
+ * inside its callback is dead until that request lands — so the panels, the
+ * file tree and the keyboard shortcuts are wired immediately, and only the
+ * editor's own behaviour waits. Clicking Structure a moment after load used to
+ * do nothing at all.
+ */
+
+function wireChrome() {
+  el("filter").oninput = renderTree;
+  el("preview-open").onclick = () => window.open(el("preview").src, "_blank");
+
+  el("build-btn").onclick = async () => {
+    setStatus("building…");
+    const result = await api.build();
+    if (result.ok) {
+      setStatus(`built ${result.documents} docs in ${result.duration}s`, "ok");
+    } else {
+      setStatus("build failed", "bad");
+      toast(result.error, true);
+    }
+    refreshTree();
+    refreshProblems();
+    refreshDocuments();
+    state.structure = null;
+  };
+
+  el("structure-btn").onclick = () =>
+    el("structure").hidden ? openStructure() : closeStructure();
+  el("structure-close").onclick = closeStructure;
+  for (const button of tabButtons()) {
+    button.onclick = () => showStructureTab(button.dataset.tab);
+  }
+
+  el("problems-badge").onclick = () => toggleProblems();
+  el("problems-close").onclick = () => toggleProblems(false);
+  el("problems-recheck").onclick = refreshProblems;
+  el("save-btn").onclick = saveFile;
+
+  window.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+      event.preventDefault();
+      saveFile();
+    }
+    if (event.key === "Escape") {
+      if (!el("structure").hidden) closeStructure();
+      else if (!el("problems").hidden) toggleProblems(false);
+    }
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (state.dirty) event.preventDefault();
+  });
+
+  wireDropZone();
+}
+
+async function boot() {
+  wireChrome();
+  await refreshTree();
+  await wireNewDialog();
+  await refreshProblems();
+  await refreshDocuments();
+  setStatus("loading editor…");
+}
+
+boot();
 
 require.config({
   paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs" },
 });
 
-require(["vs/editor/editor.main"], async () => {
+require(["vs/editor/editor.main"], () => {
   state.editor = monaco.editor.create(el("editor"), {
     value: "",
     language: "markdown",
@@ -660,45 +1048,13 @@ require(["vs/editor/editor.main"], async () => {
     schedulePreview();
   });
   state.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
-
-  el("save-btn").onclick = saveFile;
-  el("filter").oninput = renderTree;
-  el("preview-open").onclick = () => window.open(el("preview").src, "_blank");
-  el("build-btn").onclick = async () => {
-    setStatus("building…");
-    const result = await api.build();
-    if (result.ok) {
-      setStatus(`built ${result.documents} docs in ${result.duration}s`, "ok");
-    } else {
-      setStatus("build failed", "bad");
-      toast(result.error, true);
-    }
-    refreshTree();
-    refreshProblems();
-    refreshDocuments();
-  };
-
-  el("problems-badge").onclick = () => toggleProblems();
-  el("problems-close").onclick = () => toggleProblems(false);
-  el("problems-recheck").onclick = refreshProblems;
-
-  window.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
-      event.preventDefault();
-      saveFile();
-    }
-    if (event.key === "Escape" && !el("problems").hidden) toggleProblems(false);
-  });
-  window.addEventListener("beforeunload", (event) => {
-    if (state.dirty) event.preventDefault();
-  });
-
   monaco.languages.registerCompletionItemProvider("markdown", wikiCompletionProvider());
 
-  wireDropZone();
-  await refreshTree();
-  await wireNewDialog();
-  await refreshProblems();
-  await refreshDocuments();
+  state.ready = true;
   setStatus("ready", "ok");
+  if (state.pendingOpen) {
+    const path = state.pendingOpen;
+    state.pendingOpen = null;
+    openFile(path);
+  }
 });

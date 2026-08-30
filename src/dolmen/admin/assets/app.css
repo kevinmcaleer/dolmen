@@ -34,7 +34,13 @@ body {
 .btn-quiet { background: none; border: none; color: var(--muted); }
 
 /* layout */
-.layout { flex: 1; display: grid; grid-template-columns: 16rem 1fr 1fr; min-height: 0; }
+/* `position: relative` makes this the containing block for the problems and
+   structure panels. Without it they position against the viewport and cover
+   the toolbar — including the buttons that open them. */
+.layout {
+  position: relative;
+  flex: 1; display: grid; grid-template-columns: 16rem 1fr 1fr; min-height: 0;
+}
 .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .pane:last-child { border-right: none; }
 .pane-head {
@@ -213,3 +219,99 @@ dialog menu { display: flex; gap: .5rem; justify-content: flex-end; padding: 0; 
   background: #22262e; color: var(--accent); cursor: pointer;
 }
 .backlinks__link:hover { border-color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+   Structure: navigation, data files, layouts, includes, collections.
+   A right-hand drawer rather than a bottom panel — these are things you browse
+   and edit, not a list of faults you work through.
+   --------------------------------------------------------------------------- */
+
+.structure[hidden] { display: none; }
+
+.structure {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 25;
+  width: min(34rem, 60vw); display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, .45);
+  animation: structure-in .16s ease-out;
+}
+@keyframes structure-in { from { transform: translateX(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .structure { animation: none; } }
+
+.structure__head {
+  display: flex; align-items: center; gap: .6rem; flex: none; flex-wrap: wrap;
+  padding: .45rem .75rem; border-bottom: 1px solid var(--line);
+}
+.structure__tabs { display: flex; gap: .25rem; }
+.structure__tab {
+  font: inherit; font-size: 12px; padding: .2rem .55rem;
+  border: 1px solid transparent; border-radius: .3rem;
+  background: none; color: var(--muted); cursor: pointer;
+}
+.structure__tab:hover { color: var(--ink); }
+.structure__tab.is-active { color: var(--accent); border-color: var(--line); background: #22262e; }
+
+.structure__body { overflow-y: auto; padding: .6rem .75rem 1.5rem; }
+.structure__hint { color: var(--muted); font-size: 12px; margin: 0 0 .6rem; }
+.structure__file {
+  margin: 0 0 .35rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; color: var(--accent);
+}
+
+/* reorderable rows (navigation and data tables) */
+.rows { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .6rem; }
+.row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: .4rem; align-items: center;
+  padding: .3rem .4rem; border: 1px solid var(--line); border-radius: .35rem;
+  background: #1f232a;
+}
+.row.is-dragging { opacity: .4; }
+.row.is-over { border-color: var(--accent); }
+.row__grip { cursor: grab; color: var(--muted); padding: 0 .2rem; user-select: none; }
+.row__fields { display: grid; gap: .25rem; }
+.row__field { display: grid; grid-template-columns: 6rem 1fr; gap: .4rem; align-items: center; }
+.row__field label { color: var(--muted); font-size: 11px; }
+.row__field input {
+  font: inherit; font-size: 12px; padding: .2rem .4rem; border-radius: .25rem;
+  border: 1px solid var(--line); background: #14161a; color: var(--ink); min-width: 0;
+}
+.row__remove {
+  font: inherit; border: none; background: none; color: var(--muted);
+  cursor: pointer; padding: .1rem .35rem; border-radius: .25rem;
+}
+.row__remove:hover { color: var(--sev-error); background: var(--sev-error-bg); }
+
+.structure__actions { display: flex; gap: .4rem; margin-bottom: 1.25rem; }
+
+/* template usage */
+.uses { list-style: none; margin: 0 0 1rem; padding: 0; }
+.use {
+  padding: .45rem .5rem; border: 1px solid var(--line); border-radius: .35rem;
+  margin-bottom: .35rem; background: #1f232a;
+}
+.use__name { font-weight: 600; }
+.use__name button {
+  font: inherit; font-weight: 600; border: none; background: none;
+  color: var(--accent); cursor: pointer; padding: 0;
+}
+.use__meta { color: var(--muted); font-size: 11.5px; margin-top: .15rem; }
+.use__params { margin-top: .25rem; display: flex; flex-wrap: wrap; gap: .25rem; }
+.use__param {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  padding: .05rem .35rem; border-radius: .25rem;
+  background: var(--sev-info-bg); color: var(--sev-info);
+}
+.use__usedby { margin: .3rem 0 0; padding-left: 1rem; color: var(--muted); font-size: 11.5px; }
+.use__usedby button {
+  font: inherit; border: none; background: none; color: var(--muted);
+  cursor: pointer; padding: 0; text-decoration: underline dotted;
+}
+.use__usedby button:hover { color: var(--accent); }
+.use--unused { border-style: dashed; opacity: .75; }
+
+.structure__form { display: grid; gap: .5rem; max-width: 24rem; }
+.structure__form label { display: grid; gap: .2rem; color: var(--muted); font-size: 12px; }
+.structure__form input {
+  font: inherit; padding: .3rem .45rem; border-radius: .3rem;
+  border: 1px solid var(--line); background: #14161a; color: var(--ink);
+}

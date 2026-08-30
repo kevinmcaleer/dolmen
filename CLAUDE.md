@@ -72,6 +72,8 @@ Twenty of Jekyll's filters are already Liquid built-ins (`where`, `date`, `defau
 | `templating.py` | Liquid env, Jekyll's include tag, the 18 non-builtin Jekyll filters, layout chain |
 | `plugins.py` | Hook dispatch; loads `_plugins/*.py` and `dolmen.plugins` entry points |
 | `validate.py` | The checks behind the problems panel and `dolmen doctor` |
+| `links.py` | The wiki-link index: resolution, backlinks, ambiguity |
+| `structure.py` | Template usage, include parameters, data-file shape |
 | `builder.py` | The five passes above |
 | `server.py` | Dev server: serve `_site/`, watch, rebuild, SSE live reload |
 | `admin/app.py` | HTTP API behind the front end (tree, read, write, create, upload, build) |
@@ -106,6 +108,43 @@ Currently at ~87%. `server.py` is the weakest at ~64%: `serve()`, the watcher lo
 - Errors the user caused (bad front matter, missing layout, unparseable config) raise a `StaticError` subclass carrying the offending path, so the CLI prints one line instead of a traceback. Non-strict builds collect these as warnings and keep going; `--strict` re-raises. Preserve that split when adding failure modes.
 - Tests build real sites in `tmp_path` via the `site` fixture in `conftest.py` rather than mocking the filesystem. Add to that fixture when a test needs new content.
 - `:title` in a permalink is the **filename** slug (or front-matter `slug:`), not the slugified title — same as Jekyll. Tests assert on this.
+
+## Wiki links
+
+`links.py` builds one index per build rather than searching per link. Resolution
+order is exact title → slugified title → the document's own slug → filename, and
+`[[Page#Section]]` appends the heading's anchor.
+
+Two things to preserve:
+
+- **Heading anchors are generated with our own `slugify`** (passed to the
+  anchors plugin), so a link can compute the id the renderer produced. Changing
+  one without the other silently breaks every heading link.
+- **`Link.line` is a line in the *file*, not the body.** Documents carry
+  `body_line` for this. Reporting body-relative lines put the problems panel off
+  by the height of the front matter.
+
+Colliding titles resolve to the first by collection then path — stable but
+arbitrary — and are reported as `ambiguous-wikilink` rather than picked
+silently.
+
+## The front end
+
+Three things worth knowing before editing `admin/assets/`:
+
+- **Chrome is wired before Monaco loads.** Monaco comes from a CDN; anything
+  wired inside its callback is dead until that lands. `wireChrome()` runs
+  immediately, and only editor behaviour waits. `openFile` queues into
+  `state.pendingOpen` if called too early.
+- **The panels live inside `<main class="layout">`**, which is
+  `position: relative`. As siblings they resolved against the viewport and
+  covered the toolbar — including the buttons that open them.
+- **A `display` on a panel class beats the UA `[hidden]` rule**, so every panel
+  restates `.panel[hidden] { display: none }`.
+
+Live preview posts the unsaved buffer to `/api/preview`, which renders it
+through the real pipeline against the last build's site model and restores that
+model afterwards. Nothing is written; a preview must never leak into a build.
 
 ## Validation
 

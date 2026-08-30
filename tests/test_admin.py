@@ -247,3 +247,98 @@ def test_front_end_hides_the_problems_panel_by_default(client):
     html = client.get("/_dolmen/").text
     assert "problems-badge" in html
     assert 'id="problems" hidden' in html
+
+
+# -- structure endpoints -----------------------------------------------------
+
+
+def test_structure_endpoint_describes_the_site(client):
+    payload = client.get("/_dolmen/api/structure").json()
+    layout_names = {layout["name"] for layout in payload["layouts"]}
+    assert {"default", "page", "post"} <= layout_names
+    assert any(i["name"] == "header.html" for i in payload["includes"])
+    assert any(d["name"] == "navigation.yml" for d in payload["data"])
+    assert "posts" in payload["collections"]
+
+
+def test_saving_a_data_file_reorders_without_reflowing(client, tmp_path):
+    path = tmp_path / "site/_data/navigation.yml"
+    before = sorted(path.read_text(encoding="utf-8").splitlines())
+
+    rows = [
+        {"name": "About", "link": "/about.html"},
+        {"name": "Home", "link": "/"},
+        {"name": "Blog", "link": "/blog/"},
+    ]
+    response = client.post("/_dolmen/api/data", json={"path": "_data/navigation.yml", "rows": rows})
+    assert response.status_code == 200
+    assert response.json()["saved"] is True
+
+    after = path.read_text(encoding="utf-8")
+    assert after.index("About") < after.index("Home")
+    assert sorted(after.splitlines()) == before, "same lines, only reordered"
+
+
+def test_saving_data_refuses_a_path_outside_the_site(client):
+    response = client.post(
+        "/_dolmen/api/data", json={"path": "../escape.yml", "rows": [{"a": 1}]}
+    )
+    assert response.status_code == 400
+
+
+def test_saving_data_refuses_a_non_sequence(client):
+    response = client.post(
+        "/_dolmen/api/data", json={"path": "_data/navigation.yml", "rows": {"a": 1}}
+    )
+    assert response.status_code == 400
+
+
+def test_creating_a_collection_writes_config_and_directory(client, tmp_path):
+    response = client.post(
+        "/_dolmen/api/collection", json={"name": "recipes", "permalink": "/recipes/:name/"}
+    )
+    assert response.status_code == 200
+    assert (tmp_path / "site/_recipes").is_dir()
+
+    import yaml
+
+    config = yaml.safe_load((tmp_path / "site/_config.yml").read_text(encoding="utf-8"))
+    assert config["collections"]["recipes"]["permalink"] == "/recipes/:name/"
+    # The existing collection survived.
+    assert "projects" in config["collections"]
+
+
+def test_creating_a_duplicate_collection_is_refused(client):
+    body = {"name": "projects"}
+    assert client.post("/_dolmen/api/collection", json=body).status_code == 409
+
+
+def test_creating_a_collection_rejects_a_bad_name(client):
+    response = client.post("/_dolmen/api/collection", json={"name": "../evil"})
+    assert response.status_code == 400
+
+
+def test_panels_are_positioned_below_the_toolbar(client):
+    """Regression: the structure panel covered the button that opens it.
+
+    Both panels are absolutely positioned. They were siblings of `.layout`, so
+    they resolved against the viewport and overlapped the toolbar — clicking
+    Structure a second time hit the panel's own tab bar instead of the button.
+    """
+    html = client.get("/_dolmen/").text
+    main = html[html.index('<main class="layout">') : html.index("</main>")]
+    assert 'class="structure"' in main
+    assert 'class="problems"' in main
+
+    css = client.get("/_dolmen/assets/app.css").text
+    layout = css[css.index(".layout {") : css.index(".layout {") + 200]
+    assert "position: relative" in layout
+
+
+def test_front_end_wires_its_chrome_before_monaco_loads(client):
+    """Regression: toolbar buttons were inert until the CDN request landed."""
+    js = client.get("/_dolmen/assets/app.js").text
+    boot = js.index("function boot()")
+    require = js.index('require(["vs/editor/editor.main"]')
+    assert boot < require, "chrome must be wired before the Monaco callback"
+    assert "wireChrome();" in js
