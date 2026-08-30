@@ -140,8 +140,18 @@ def clean(source: Path) -> None:
     "--source", "-s", default=".", type=click.Path(file_okay=False, path_type=Path),
     help="Site source directory.",
 )
-def doctor(source: Path) -> None:
-    """Build without writing, and report every warning found."""
+@click.option(
+    "--strict", is_flag=True, help="Exit non-zero if there are warnings, not just errors."
+)
+def doctor(source: Path, strict: bool) -> None:
+    """Build the site and report every problem found.
+
+    The same checks the front end's problems panel runs: broken links and
+    images, unresolved wiki links, missing layouts and includes, absent front
+    matter, and code fences tagged with a language nothing can highlight.
+    """
+    from .validate import validate
+
     try:
         builder = Builder.from_source(source)
         result = builder.build()
@@ -149,12 +159,37 @@ def doctor(source: Path) -> None:
         _fail(exc)
         return
 
-    if not result.warnings:
+    report = validate(builder.site, builder.config, build_warnings=result.warnings)
+
+    if not report.total:
         click.secho("no problems found", fg="green")
         return
-    for warning in result.warnings:
-        click.secho(f"warning: {warning}", fg="yellow")
-    click.secho(f"{len(result.warnings)} problem(s) found", fg="yellow")
+
+    colours = {"error": "red", "warning": "yellow", "info": "cyan"}
+    for problem in report.sorted():
+        location = problem.file or ""
+        if problem.line:
+            location = f"{location}:{problem.line}"
+        click.secho(f"{problem.severity}: {problem.title}", fg=colours[problem.severity], bold=True)
+        if location:
+            click.echo(f"  {location}")
+        click.echo(f"  {problem.message}")
+        click.secho(f"  why: {problem.why}", dim=True)
+        click.echo()
+
+    summary = ", ".join(
+        f"{count} {label}"
+        for count, label in (
+            (report.errors, "error(s)"),
+            (report.warnings, "warning(s)"),
+            (report.infos, "info"),
+        )
+        if count
+    )
+    click.secho(summary, fg="yellow")
+
+    if report.errors or (strict and report.warnings):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

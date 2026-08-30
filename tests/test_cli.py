@@ -88,12 +88,28 @@ def test_doctor_reports_a_clean_site(runner, tmp_path: Path):
     assert "no problems found" in result.output
 
 
-def test_doctor_lists_problems(runner, tmp_path: Path):
+def test_doctor_lists_problems_with_a_reason(runner, tmp_path: Path):
     site = tmp_path / "site"
     runner.invoke(main, ["new", str(site)])
     (site / "bad.md").write_text("---\ntitle: [oops\n---\n", encoding="utf-8")
     result = runner.invoke(main, ["doctor", "--source", str(site)])
-    assert "problem(s) found" in result.output
+    assert "error:" in result.output
+    assert "why:" in result.output, "every problem explains why it matters"
+    assert "1 error(s)" in result.output
+    assert result.exit_code == 1
+
+
+def test_doctor_reports_a_broken_link(runner, tmp_path: Path):
+    site = tmp_path / "site"
+    runner.invoke(main, ["new", str(site)])
+    (site / "linky.md").write_text(
+        "---\ntitle: Linky\n---\n\n[nowhere](/missing/page/)\n", encoding="utf-8"
+    )
+    result = runner.invoke(main, ["doctor", "--source", str(site)])
+    assert "/missing/page/" in result.output
+    # Warnings alone are not a failure unless --strict.
+    assert result.exit_code == 0
+    assert runner.invoke(main, ["doctor", "--source", str(site), "--strict"]).exit_code == 1
 
 
 def test_clean_removes_the_output(runner, tmp_path: Path):

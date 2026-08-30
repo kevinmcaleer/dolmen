@@ -89,11 +89,25 @@ class DevSite:
         self.reload = ReloadChannel()
         self.last_result: BuildResult | None = None
         self.last_error: str | None = None
+        #: The Site from the last successful build, kept so the problems panel
+        #: can validate without paying for another build.
+        self.last_site: Any = None
         self._lock = threading.Lock()
 
     @property
     def destination(self) -> Path:
         return load_config(self.source, self.overrides).destination
+
+    def problems(self) -> dict[str, Any]:
+        """Validate the last build, for the front end's problems panel."""
+        from .config import load_config
+        from .validate import Report, validate
+
+        if self.last_site is None:
+            return Report().to_dict()
+        config = load_config(self.source, self.overrides)
+        warnings = self.last_result.warnings if self.last_result else []
+        return validate(self.last_site, config, build_warnings=warnings).to_dict()
 
     def build(self) -> BuildResult | None:
         """Rebuild, capturing errors so a bad save never kills the server."""
@@ -101,6 +115,7 @@ class DevSite:
             try:
                 builder = Builder.from_source(self.source, overrides=self.overrides)
                 self.last_result = builder.build()
+                self.last_site = builder.site
                 self.last_error = None
             except StaticError as exc:
                 self.last_error = str(exc)

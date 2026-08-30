@@ -175,3 +175,75 @@ def _tiny_png() -> bytes:
     return base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
+
+
+def test_upload_slugifies_a_filename_with_spaces(client, tmp_path):
+    """Regression: a dragged-in screenshot produced markdown that never rendered.
+
+    `![alt](/assets/img/Screenshot 2026-08-28 at 10.25.54.png)` is not a valid
+    markdown image — the space ends the URL — so the raw text appeared on the
+    page instead of the picture.
+    """
+    response = client.post(
+        "/_dolmen/api/upload",
+        files={"file": ("Screenshot 2026-08-28 at 10.25.54.png", _tiny_png(), "image/png")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert " " not in payload["url"]
+    assert payload["url"] == "/assets/img/screenshot-2026-08-28-at-10-25-54.png"
+    assert (tmp_path / "site/assets/img/screenshot-2026-08-28-at-10-25-54.png").is_file()
+    # Alt text keeps the readable original.
+    assert payload["markdown"].startswith("![Screenshot 2026-08-28 at 10.25.54](")
+
+
+def test_uploaded_image_actually_renders_as_an_image(client, tmp_path):
+    """The whole point: the returned markdown must survive the markdown parser."""
+    from dolmen.builder import Builder
+
+    payload = client.post(
+        "/_dolmen/api/upload",
+        files={"file": ("My Photo.png", _tiny_png(), "image/png")},
+    ).json()
+
+    post = tmp_path / "site/_posts/2026-01-01-with-image.md"
+    post.write_text(
+        f"---\ntitle: With Image\n---\n\n{payload['markdown']}\n", encoding="utf-8"
+    )
+    Builder.from_source(tmp_path / "site").build()
+
+    html = next((tmp_path / "site/_site").rglob("**/with-image/index.html")).read_text(
+        encoding="utf-8"
+    )
+    assert f'<img src="{payload["url"]}"' in html
+    assert "![" not in html, "the markdown leaked through instead of rendering"
+
+
+def test_problems_endpoint_reports_a_clean_site(client):
+    payload = client.get("/_dolmen/api/problems").json()
+    assert payload["total"] == 0
+    assert payload["worst"] is None
+    assert payload["problems"] == []
+
+
+def test_problems_endpoint_reports_a_broken_link(client, tmp_path):
+    (tmp_path / "site/linky.md").write_text(
+        "---\ntitle: Linky\n---\n\n[nope](/missing/)\n", encoding="utf-8"
+    )
+    client.post("/_dolmen/api/build")
+    payload = client.get("/_dolmen/api/problems").json()
+    assert payload["total"] >= 1
+    assert any(p["rule"] == "broken-link" for p in payload["problems"])
+    assert all(p["why"] for p in payload["problems"])
+
+
+def test_front_end_hides_the_problems_panel_by_default(client):
+    """Regression: `.problems { display: flex }` beat the UA `[hidden]` rule, so
+    the panel's header showed through even when `hidden` was set."""
+    css = client.get("/_dolmen/assets/app.css").text
+    assert ".problems[hidden]" in css, "the panel must restate [hidden] to stay hidden"
+
+    html = client.get("/_dolmen/").text
+    assert "problems-badge" in html
+    assert 'id="problems" hidden' in html

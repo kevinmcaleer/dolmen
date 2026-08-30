@@ -72,3 +72,25 @@ def test_empty_categories_do_not_leave_a_double_slash():
 )
 def test_to_output_path(url, expected):
     assert permalinks.to_output_path(url) == PurePosixPath(expected)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # Jekyll replaces every non-alphanumeric run with a hyphen rather than
+        # stripping it, which only shows up when punctuation sits *between*
+        # characters. Stripping gave `v12-release` and `102554`.
+        ("v1.2 Release", "v1-2-release"),
+        ("10.25.54", "10-25-54"),
+        ("Pi 5 & Friends", "pi-5-friends"),
+        ("C++ Notes", "c-notes"),
+        ("Screenshot 2026-08-28 at 10.25.54", "screenshot-2026-08-28-at-10-25-54"),
+        ("--leading and trailing--", "leading-and-trailing"),
+    ],
+)
+def test_slugify_replaces_punctuation_rather_than_stripping_it(value, expected):
+    assert permalinks.slugify(value) == expected
+
+
+def test_slugify_raw_mode_only_collapses_whitespace():
+    assert permalinks.slugify("Hello, World!", "raw") == "Hello,-World!"

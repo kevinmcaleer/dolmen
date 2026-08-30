@@ -113,6 +113,20 @@ Affected: `cols offset limit with as in for if else and or not true false nil em
 
 Not yet implemented: Jekyll's own `{% highlight %}`, `{% link %}`, `{% post_url %}` and `{% seo %}` tags, and kramdown inline attribute lists (`{:class="cover"}`).
 
+## Checking a site
+
+`dolmen doctor` reports every problem it can find, and the front end shows the
+same list in a panel from the bottom of the window:
+
+- broken internal links and missing images
+- unresolved `[[wiki links]]`
+- layouts and includes that do not exist
+- missing front matter (`title`, and `date` on posts)
+- code fences tagged with a language nothing can highlight
+
+Each finding says what is wrong, where, and why it matters. `doctor` exits
+non-zero on errors, or on warnings too with `--strict` — useful in CI.
+
 ## Wiki links
 
 Any document can reference another by title, with no path:

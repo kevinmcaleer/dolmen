@@ -13,6 +13,12 @@
   <span class="site-name" id="site-name"></span>
   <span class="spacer"></span>
   <span class="status" id="status">ready</span>
+  <button id="problems-badge" class="badge badge--clean" aria-expanded="false"
+          title="Site problems — click to see them">
+    <span class="badge__dot" aria-hidden="true"></span>
+    Problems
+    <span class="badge__counts" id="badge-counts"><span class="badge__ok">✓</span></span>
+  </button>
   <button id="new-btn" class="btn">New</button>
   <button id="build-btn" class="btn">Rebuild</button>
   <button id="save-btn" class="btn btn-primary" disabled>Save</button>
@@ -45,6 +51,17 @@
     <iframe id="preview" class="preview" src="/" title="Live preview"></iframe>
   </section>
 </main>
+
+<section class="problems" id="problems" hidden aria-label="Site problems">
+  <header class="problems__head">
+    <strong>Problems</strong>
+    <span class="problems__summary" id="problems-summary"></span>
+    <span class="spacer"></span>
+    <button class="btn btn-quiet" id="problems-recheck" title="Re-run the checks">Recheck</button>
+    <button class="btn btn-quiet" id="problems-close" title="Close (Esc)">&times;</button>
+  </header>
+  <ul class="problems__list" id="problems-list"></ul>
+</section>
 
 <dialog id="new-dialog">
   <form method="dialog" id="new-form">

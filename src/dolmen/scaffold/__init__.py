@@ -123,6 +123,21 @@ Welcome to **{title}**.
 {{% endfor %}}
 """
 
+_BLOG = """\
+---
+title: Blog
+permalink: /blog/
+---
+
+{% for post in site.posts %}
+## [{{ post.title }}]({{ post.url }})
+
+{{ post.date | date_to_string }}
+{% if post.tags %} · {{ post.tags | array_to_sentence_string }}{% endif %}
+
+{% endfor %}
+"""
+
 _ABOUT = """\
 ---
 title: About
@@ -211,6 +226,7 @@ def create_site(path: Path, *, title: str | None = None, force: bool = False) ->
         "_data/navigation.yml": _DATA_NAV,
         "index.md": _INDEX.format(title=site_title),
         "about.md": _ABOUT,
+        "blog.md": _BLOG,
         f"_posts/{today.isoformat()}-hello-dolmen.md": _POST.format(date=today.isoformat()),
         "assets/css/main.css": _CSS,
         "README.md": _README.format(title=site_title),

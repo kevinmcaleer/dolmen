@@ -71,6 +71,7 @@ Twenty of Jekyll's filters are already Liquid built-ins (`where`, `date`, `defau
 | `markdown.py` | markdown-it-py setup, build-time Pygments highlighting, `[[wiki links]]` |
 | `templating.py` | Liquid env, Jekyll's include tag, the 18 non-builtin Jekyll filters, layout chain |
 | `plugins.py` | Hook dispatch; loads `_plugins/*.py` and `dolmen.plugins` entry points |
+| `validate.py` | The checks behind the problems panel and `dolmen doctor` |
 | `builder.py` | The five passes above |
 | `server.py` | Dev server: serve `_site/`, watch, rebuild, SSE live reload |
 | `admin/app.py` | HTTP API behind the front end (tree, read, write, create, upload, build) |
@@ -105,6 +106,25 @@ Currently at ~87%. `server.py` is the weakest at ~64%: `serve()`, the watcher lo
 - Errors the user caused (bad front matter, missing layout, unparseable config) raise a `StaticError` subclass carrying the offending path, so the CLI prints one line instead of a traceback. Non-strict builds collect these as warnings and keep going; `--strict` re-raises. Preserve that split when adding failure modes.
 - Tests build real sites in `tmp_path` via the `site` fixture in `conftest.py` rather than mocking the filesystem. Add to that fixture when a test needs new content.
 - `:title` in a permalink is the **filename** slug (or front-matter `slug:`), not the slugified title — same as Jekyll. Tests assert on this.
+
+## Validation
+
+`validate.py` runs *after* a build, against the real output directory, so a link
+is only called broken if the file genuinely is not there. It backs both the
+front end's problems panel (`/_dolmen/api/problems`) and `dolmen doctor` — one
+implementation, so the two can't drift.
+
+Two rules when adding a check:
+
+- **Every problem carries a `why`.** A checker that names a fault without
+  explaining it teaches nothing, and these run in front of someone writing
+  prose, not debugging a build. A test asserts every problem has one.
+- **Prefer a miss to a false positive.** The panel is always on screen, and
+  people stop reading a panel that cries wolf. Skip anything ambiguous —
+  external links, relative URLs, templated attributes — rather than guessing.
+
+A specific check's error suppresses the generic build warning for the same file,
+so one fault is reported once.
 
 ## Known gaps
 

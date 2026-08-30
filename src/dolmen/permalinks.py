@@ -23,7 +23,11 @@ BUILTIN_STYLES = {
     "none": "/:categories/:title:output_ext",
 }
 
-_SLUG_STRIP_RE = re.compile(r"[^\w\s-]")
+#: Jekyll's default slugify replaces every non-alphanumeric run with a single
+#: hyphen — it does not strip punctuation. The difference is visible whenever
+#: punctuation sits *between* characters: `v1.2 Release` is `v1-2-release` in
+#: Jekyll, but `v12-release` if the dot is merely removed.
+_SLUG_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _SLUG_HYPHEN_RE = re.compile(r"[-\s]+")
 
 #: `_posts` filenames are `YYYY-MM-DD-title.ext`.
@@ -39,8 +43,7 @@ def slugify(value: Any, mode: str = "default") -> str:
     if mode == "raw":
         return _SLUG_HYPHEN_RE.sub("-", text.strip())
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    text = _SLUG_STRIP_RE.sub("", text).strip().lower()
-    return _SLUG_HYPHEN_RE.sub("-", text)
+    return _SLUG_NON_ALNUM_RE.sub("-", text.lower()).strip("-")
 
 
 def split_dated_filename(stem: str) -> tuple[dt.date | None, str]:

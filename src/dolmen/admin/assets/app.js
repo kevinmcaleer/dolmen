@@ -35,6 +35,7 @@ const api = {
   async build() {
     return (await fetch("/_dolmen/api/build", { method: "POST" })).json();
   },
+  async problems() { return (await fetch("/_dolmen/api/problems")).json(); },
   async upload(file) {
     const body = new FormData();
     body.append("file", file);
@@ -45,7 +46,7 @@ const api = {
 };
 
 const el = (id) => document.getElementById(id);
-const state = { editor: null, path: null, dirty: false, entries: [], meta: null };
+const state = { editor: null, path: null, dirty: false, entries: [], meta: null, report: null };
 
 /* ---------- chrome ---------- */
 
@@ -148,7 +149,7 @@ const LANGUAGES = {
   css: "css", scss: "scss", js: "javascript", py: "python", txt: "plaintext",
 };
 
-async function openFile(path) {
+async function openFile(path, line) {
   if (state.dirty && !confirm("Discard unsaved changes?")) return;
 
   let file;
@@ -171,6 +172,12 @@ async function openFile(path) {
     el("preview-url").textContent = file.url;
     el("preview").src = file.url;
   }
+
+  if (line) {
+    state.editor.revealLineInCenter(line);
+    state.editor.setPosition({ lineNumber: line, column: 1 });
+    state.editor.focus();
+  }
 }
 
 async function saveFile() {
@@ -186,6 +193,7 @@ async function saveFile() {
       setStatus("saved", "ok");
       toast("Saved");
       refreshTree();
+      refreshProblems();
     }
   } catch (error) {
     setStatus("save failed", "bad");
@@ -227,6 +235,7 @@ function wireDropZone() {
         setStatus("uploaded", "ok");
         toast(`Uploaded to ${result.url}`);
         refreshTree();
+        refreshProblems();
       } catch (error) {
         setStatus("upload failed", "bad");
         toast(String(error.message || error), true);
@@ -281,6 +290,128 @@ async function wireNewDialog() {
   });
 }
 
+
+/* ---------- problems panel ----------
+ *
+ * Modelled on Snakie's ERC panel: a severity badge that opens a list of cards,
+ * each of which says what is wrong AND why it matters. A checker that only
+ * names the fault teaches nothing.
+ */
+
+const SEV_GLYPH = { error: "\u2715", warning: "!", info: "i" };
+
+function renderBadge(report) {
+  const badge = el("problems-badge");
+  const counts = el("badge-counts");
+  const worst = report.worst || "clean";
+
+  badge.className = `badge badge--${worst}`;
+  badge.title = report.total
+    ? `${report.total} problem${report.total === 1 ? "" : "s"} — click to see them`
+    : "No problems found";
+
+  counts.replaceChildren();
+  if (!report.total) {
+    const ok = document.createElement("span");
+    ok.className = "badge__ok";
+    ok.textContent = "\u2713";
+    counts.append(ok);
+    return;
+  }
+  for (const severity of ["error", "warning", "info"]) {
+    const n = report[severity + "s"];
+    if (!n) continue;
+    const chip = document.createElement("span");
+    chip.className = `badge__count badge__count--${severity}`;
+    chip.textContent = `${SEV_GLYPH[severity]}${n}`;
+    counts.append(chip);
+  }
+}
+
+function renderProblems(report) {
+  const list = el("problems-list");
+  list.replaceChildren();
+
+  el("problems-summary").textContent = report.total
+    ? [
+        report.errors && `${report.errors} error${report.errors === 1 ? "" : "s"}`,
+        report.warnings && `${report.warnings} warning${report.warnings === 1 ? "" : "s"}`,
+        report.infos && `${report.infos} info`,
+      ].filter(Boolean).join(" · ")
+    : "";
+
+  if (!report.total) {
+    const empty = document.createElement("li");
+    empty.className = "problems__empty";
+    empty.textContent = "No problems found.";
+    list.append(empty);
+    return;
+  }
+
+  for (const problem of report.problems) {
+    const row = document.createElement("li");
+    row.className = `problem problem--${problem.severity}`;
+
+    const sev = document.createElement("span");
+    sev.className = "problem__sev";
+    sev.textContent = SEV_GLYPH[problem.severity];
+    sev.title = problem.severity;
+
+    const body = document.createElement("div");
+
+    const title = document.createElement("div");
+    title.className = "problem__title";
+    title.textContent = problem.title;
+    body.append(title);
+
+    if (problem.file) {
+      const where = document.createElement("div");
+      where.className = "problem__where";
+      where.textContent = problem.line ? `${problem.file}:${problem.line}` : problem.file;
+      body.append(where);
+    }
+
+    const msg = document.createElement("div");
+    msg.className = "problem__msg";
+    msg.textContent = problem.message;
+    body.append(msg);
+
+    const why = document.createElement("div");
+    why.className = "problem__why";
+    const label = document.createElement("b");
+    label.textContent = "Why it matters: ";
+    why.append(label, document.createTextNode(problem.why));
+    body.append(why);
+
+    row.append(sev, body);
+
+    if (problem.file) {
+      row.title = "Open this file";
+      row.onclick = () => openFile(problem.file, problem.line);
+    }
+    list.append(row);
+  }
+}
+
+async function refreshProblems() {
+  try {
+    const report = await api.problems();
+    state.report = report;
+    renderBadge(report);
+    if (!el("problems").hidden) renderProblems(report);
+  } catch (error) {
+    console.warn("could not fetch problems", error);
+  }
+}
+
+function toggleProblems(force) {
+  const panel = el("problems");
+  const open = force === undefined ? panel.hidden : force;
+  panel.hidden = !open;
+  el("problems-badge").setAttribute("aria-expanded", String(open));
+  if (open) renderProblems(state.report || { total: 0, problems: [] });
+}
+
 /* ---------- boot ---------- */
 
 require.config({
@@ -313,19 +444,24 @@ require(["vs/editor/editor.main"], async () => {
     const result = await api.build();
     if (result.ok) {
       setStatus(`built ${result.documents} docs in ${result.duration}s`, "ok");
-      if (result.warnings?.length) toast(`${result.warnings.length} warning(s)`, true);
     } else {
       setStatus("build failed", "bad");
       toast(result.error, true);
     }
     refreshTree();
+    refreshProblems();
   };
+
+  el("problems-badge").onclick = () => toggleProblems();
+  el("problems-close").onclick = () => toggleProblems(false);
+  el("problems-recheck").onclick = refreshProblems;
 
   window.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "s") {
       event.preventDefault();
       saveFile();
     }
+    if (event.key === "Escape" && !el("problems").hidden) toggleProblems(false);
   });
   window.addEventListener("beforeunload", (event) => {
     if (state.dirty) event.preventDefault();
@@ -334,5 +470,6 @@ require(["vs/editor/editor.main"], async () => {
   wireDropZone();
   await refreshTree();
   await wireNewDialog();
+  await refreshProblems();
   setStatus("ready", "ok");
 });

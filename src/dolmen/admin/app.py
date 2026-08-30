@@ -16,6 +16,7 @@ from starlette.routing import Route
 
 from .. import frontmatter
 from ..config import SPECIAL_DIRS
+from ..permalinks import slugify
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -178,9 +179,16 @@ def admin_routes(site: DevSite) -> list[Route]:
         if suffix not in IMAGE_SUFFIXES:
             return JSONResponse({"error": f"{suffix} is not an image"}, status_code=415)
 
+        # Slugify the stored name. A dragged-in screenshot is typically called
+        # something like "Screenshot 2026-08-28 at 10.25.54.png", and markdown
+        # will not parse `![](...)` whose URL contains spaces — the image would
+        # render as literal text. Spaces in asset URLs are worth avoiding anyway.
+        stem = Path(filename).stem
+        safe_name = f"{slugify(stem) or 'image'}{suffix}"
+
         destination_dir = site.source / "assets" / "img"
         destination_dir.mkdir(parents=True, exist_ok=True)
-        target = _unique_path(destination_dir / filename)
+        target = _unique_path(destination_dir / safe_name)
 
         size = 0
         with target.open("wb") as handle:
@@ -200,11 +208,17 @@ def admin_routes(site: DevSite) -> list[Route]:
         return JSONResponse(
             {
                 "url": url,
-                "markdown": f"![{Path(filename).stem}]({url})",
+                # Alt text keeps the human-readable original; `]` and `[` would
+                # otherwise close the alt span early.
+                "markdown": f"![{stem.replace('[', '').replace(']', '')}]({url})",
                 "width": width,
                 "height": height,
             }
         )
+
+    async def problems(request: Request) -> JSONResponse:
+        """Everything wrong with the site, for the problems panel."""
+        return JSONResponse(site.problems())
 
     async def rebuild(request: Request) -> JSONResponse:
         result = site.build()
@@ -242,6 +256,7 @@ def admin_routes(site: DevSite) -> list[Route]:
         Route("/api/new", create, methods=["POST"]),
         Route("/api/upload", upload, methods=["POST"]),
         Route("/api/build", rebuild, methods=["POST"]),
+        Route("/api/problems", problems),
         Route("/assets/{path:path}", asset),
     ]
 
