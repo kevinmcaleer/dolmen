@@ -26,8 +26,8 @@ from typing import Any
 
 import yaml
 
-from .config import SPECIAL_DIRS, Config, load_config
-from .exceptions import StaticError
+from .config import CONFIG_NAME, SPECIAL_DIRS, Config, load_config
+from .exceptions import ConfigError, StaticError
 from .markdown import MarkdownRenderer
 from .models import Document, Site, StaticFile, read_document
 from .permalinks import apply as apply_permalink
@@ -69,7 +69,24 @@ class Builder:
         overrides: dict[str, Any] | None = None,
         strict: bool = False,
     ) -> Builder:
-        return cls(load_config(Path(source), overrides), strict=strict)
+        """Load the config at `source` and prepare a build.
+
+        A missing `_config.yml` is refused rather than treated as an empty one.
+        Building whatever happens to be in the current directory copies every
+        file it finds into the output — including `.venv`, dotfiles and
+        anything else lying around — which is never what someone running
+        `dolmen build` in the wrong folder wanted.
+        """
+        source = Path(source)
+        if not (source / CONFIG_NAME).is_file():
+            raise ConfigError(
+                f"no {CONFIG_NAME} here, so this does not look like a dolmen site. "
+                f"Run `dolmen new <path>` to create one, use --source to point at an "
+                f"existing site, or add an empty {CONFIG_NAME} if this really is the "
+                f"site root.",
+                source,
+            )
+        return cls(load_config(source, overrides), strict=strict)
 
     def build(self) -> BuildResult:
         started = dt.datetime.now(dt.UTC)
@@ -150,6 +167,9 @@ class Builder:
             return False
         if any(_matches_exclude(name, parts, pattern) for pattern in self.config.exclude):
             return True
+        # A nested site is somebody else's build, not this one's content.
+        if self._nested_site(parts):
+            return True
         # Anything starting with `_` is a build input, not output — except the
         # collection directories, whose documents are published to permalinks.
         if parts and parts[0].startswith("_"):
@@ -162,6 +182,14 @@ class Builder:
         # Dotfiles are not published, but dot-directories like `.well-known` are
         # opt-in via `include:`.
         return any(part.startswith(".") for part in parts)
+
+    def _nested_site(self, parts: tuple[str, ...]) -> bool:
+        """Whether a path lies inside a subdirectory that is its own site."""
+        source = self.config.source
+        for depth in range(1, len(parts)):
+            if (source.joinpath(*parts[:depth]) / CONFIG_NAME).is_file():
+                return True
+        return False
 
     def _read_data(self) -> dict[str, Any]:
         """`_data/*.yml|yaml|json` becomes `site.data.<name>`, nested by folder."""

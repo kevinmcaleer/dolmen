@@ -156,3 +156,38 @@ def test_baseurl_prefixes_urls_and_relative_url(site: Path):
     build(site, baseurl="/sub")
     html = read(site, "index.html")
     assert '<a href="/sub/">Home</a>' in html
+
+
+def test_building_a_directory_that_is_not_a_site_is_refused(tmp_path: Path):
+    """Regression: `dolmen build` in the wrong folder built the whole tree.
+
+    With no `_config.yml` the config was treated as empty and every file in the
+    directory — `.venv`, source code, dotfiles — was copied into `_site`.
+    """
+    (tmp_path / "notes.txt").write_text("not a site", encoding="utf-8")
+    with pytest.raises(StaticError, match="does not look like a dolmen site"):
+        Builder.from_source(tmp_path)
+    assert not (tmp_path / "_site").exists()
+
+
+def test_an_empty_config_is_still_a_site(tmp_path: Path):
+    """The escape hatch the error message promises has to actually work."""
+    (tmp_path / "_config.yml").write_text("", encoding="utf-8")
+    (tmp_path / "index.md").write_text("---\ntitle: Home\n---\nHi\n", encoding="utf-8")
+    Builder.from_source(tmp_path).build()
+    assert (tmp_path / "_site/index.html").is_file()
+
+
+def test_a_nested_site_is_not_swallowed(site: Path):
+    """A subdirectory with its own _config.yml is a separate site."""
+    nested = site / "sandbox" / "other"
+    nested.mkdir(parents=True)
+    (nested / "_config.yml").write_text("title: Other\n", encoding="utf-8")
+    (nested / "index.md").write_text("---\ntitle: Other Home\n---\nBody\n", encoding="utf-8")
+    (nested / "_layouts").mkdir()
+    (nested / "_layouts/thing.html").write_text("<p>{{ content }}</p>", encoding="utf-8")
+
+    builder, _ = build(site)
+
+    assert all("sandbox" not in str(d.relative_path) for d in builder.site.documents)
+    assert not (site / "_site/sandbox").exists()
