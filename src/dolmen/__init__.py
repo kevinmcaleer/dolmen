@@ -1,4 +1,4 @@
-"""static — a Jekyll-compatible static site generator written in Python."""
+"""dolmen — a Jekyll-compatible static site generator written in Python."""
 
 __version__ = "0.1.0"
 

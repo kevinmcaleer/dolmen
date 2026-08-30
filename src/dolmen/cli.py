@@ -22,7 +22,7 @@ def _fail(exc: Exception) -> None:
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, prog_name="dolmen")
 def main() -> None:
-    """static — a Jekyll-compatible static site generator written in Python."""
+    """dolmen — a Jekyll-compatible static site generator written in Python."""
 
 
 @main.command()
