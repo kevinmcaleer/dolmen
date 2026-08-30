@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`dolmen` is a static site generator: a Python replacement for Jekyll that keeps Jekyll's directory conventions and front matter but swaps Liquid for Jinja2, and adds a browser-based build front end (Monaco editor, live preview, drag-and-drop images) that runs only during development.
+`dolmen` is a static site generator: a Python replacement for Jekyll that keeps Jekyll's directory conventions, front matter **and Liquid templates**, so an existing Jekyll site's templates run unmodified. It adds a browser-based build front end (Monaco editor, live preview, drag-and-drop images) that runs only during development.
 
 The distribution name is `dolmen-ssg` (PyPI's `dolmen` is taken by a dormant namespace package); the import package and CLI command are both `dolmen`.
 
@@ -13,7 +13,8 @@ The distribution name is `dolmen-ssg` (PyPI's `dolmen` is taken by a dormant nam
 ```sh
 uv venv && uv pip install -e ".[dev]"    # set up
 
-pytest                                    # all tests (fast; no network, no fixtures on disk to clean)
+pytest                                    # all tests
+pytest --cov                              # with the 80% coverage gate
 pytest tests/test_builder.py              # one file
 pytest tests/test_builder.py::test_wiki_links_resolve_by_title   # one test
 pytest -k permalink                       # by name
@@ -38,17 +39,22 @@ There is no build step for the front end — `admin/assets/` is plain HTML/CSS/J
 1. **Discover** — walk the source; a file with front matter becomes a `Document`, everything else a `StaticFile`. Read `_data/`.
 2. **Apply defaults** — `_config.yml`'s `defaults:` rules and per-collection defaults fill in missing front matter. Explicit front matter always wins.
 3. **Assign URLs** — every document gets its permalink *before* anything renders.
-4. **Render** — body through Jinja2, then markdown, then up the layout chain.
+4. **Render** — body through Liquid, then markdown, then up the layout chain.
 5. **Write** — documents to their permalink paths; static files copied.
 
 Steps 3 and 4 are separate passes because templates loop over `site.posts` and read `post.url`; a single pass would see empty URLs for documents not yet rendered. If you add a pass, keep this invariant.
 
-### Two Jekyll behaviours reproduced deliberately
+### The Liquid compatibility layer
 
-Both live in `templating.py` and are easy to "fix" into being wrong:
+Rendering is Liquid via `python-liquid`, which implements *Shopify* Liquid. Jekyll adds things Shopify never had, and `templating.py` supplies them. All three are easy to "fix" into being wrong:
 
-- **Layouts wrap, they don't inherit.** `render_layout` renders the document, hands the result to its layout as `content`, then hands *that* to the layout's own layout, up the chain. This is not Jinja2's `{% extends %}`, and layouts have no `{% block %}`. Loop detection caps at `_MAX_LAYOUT_DEPTH`.
-- **Includes take parameters.** Jinja2's `{% include %}` can't, so `include()` is a global function wrapped in `@pass_context`. The `pass_context` matters: without it the include can't see the caller's `site` and `page`, which was a real bug.
+- **`JekyllIncludeTag` replaces the built-in include tag.** Jekyll writes `{% include card.html title="Hi" %}`; Shopify writes `{% include 'card' title: 'Hi' %}`. The tag reads the **raw tag text** rather than the token stream — deliberately. The lexer treats `cols`, `limit` and `offset` as keywords, so `cols=3` will not tokenise. Don't "clean this up" by parsing tokens.
+- **Layouts wrap, they don't inherit.** Liquid has no layout concept at all. `render_layout` renders the document, hands the result to its layout as `content`, then hands *that* to the layout's own layout, up the chain. Loop detection caps at `_MAX_LAYOUT_DEPTH`.
+- **Strict mode uses `StrictDefaultUndefined`, not `StrictUndefined`.** Strict should catch typos while leaving `{{ x | default: y }}` working. `StrictUndefined` raises before the filter runs.
+
+`where_exp` is the only filter with real machinery: it wraps the expression in `{% if %}`, takes the inner token stream, and parses it as a `BooleanExpression` — the same route the `if` tag uses. There is no public API for parsing a bare expression.
+
+Twenty of Jekyll's filters are already Liquid built-ins (`where`, `date`, `default`, `split`, `strip_html`, `truncate`, …). Only add a filter to `_filters()` after checking it isn't one of them.
 
 ### baseurl is not part of page.url
 
@@ -63,7 +69,7 @@ Both live in `templating.py` and are easy to "fix" into being wrong:
 | `models.py` | `Document`, `StaticFile`, `Site`; the `site.*` / `page.*` mappings templates see |
 | `permalinks.py` | Jekyll placeholders (`:year`, `:title`, `:categories`, …) and named styles |
 | `markdown.py` | markdown-it-py setup, build-time Pygments highlighting, `[[wiki links]]` |
-| `templating.py` | Jinja2 env, Jekyll-compatible filters, layout chain, parameterised includes |
+| `templating.py` | Liquid env, Jekyll's include tag, the 18 non-builtin Jekyll filters, layout chain |
 | `plugins.py` | Hook dispatch; loads `_plugins/*.py` and `dolmen.plugins` entry points |
 | `builder.py` | The five passes above |
 | `server.py` | Dev server: serve `_site/`, watch, rebuild, SSE live reload |
@@ -80,6 +86,20 @@ Both live in `templating.py` and are easy to "fix" into being wrong:
 
 `admin/` is mounted by `server.py` at `/_dolmen` and is never written to the output directory. Anything it adds must not leak into a built site. Every path arriving from the browser goes through `resolve()` in `admin/app.py`, which rejects paths escaping the site source — keep that check on any new route that takes a path.
 
+## Testing
+
+**Every new feature ships with tests, and coverage must stay at or above 80%.** This is enforced, not aspirational: `fail_under = 80` in `pyproject.toml` means `pytest --cov` exits non-zero below it, and CI runs it.
+
+```sh
+pytest --cov                    # with the coverage gate
+pytest --cov --no-cov-on-fail   # see failures without the coverage noise
+pytest -q --no-cov              # fast, while iterating
+```
+
+When adding a feature, cover the failure paths too, not just the happy one — the bugs found in this codebase so far (double-wrapped code blocks, wiki links jumping to the start of a paragraph, `baseurl` mangling output paths, `page.description` under strict mode) were all edge cases a happy-path test would have missed.
+
+Currently at ~87%. `server.py` is the weakest at ~64%: `serve()`, the watcher loop and the SSE stream need a running event loop, so they are exercised by hand rather than in tests. Prefer `TestClient` over manual verification wherever it reaches.
+
 ## Conventions
 
 - Errors the user caused (bad front matter, missing layout, unparseable config) raise a `StaticError` subclass carrying the offending path, so the CLI prints one line instead of a traceback. Non-strict builds collect these as warnings and keep going; `--strict` re-raises. Preserve that split when adding failure modes.
@@ -90,6 +110,7 @@ Both live in `templating.py` and are easy to "fix" into being wrong:
 
 Tracked as issues; do not treat these as bugs to fix incidentally:
 
+- **Reserved words can't follow a dot.** python-liquid's expression lexer reserves ~20 words, so `{{ include.cols }}` fails where Jekyll accepts it. Affected: `cols offset limit with as in for if else and or not true false nil empty blank contains reversed continue`. Workaround is `{{ include["cols"] }}`. `test_reserved_words_need_bracket_access` asserts this, so an upstream fix will surface as a failing test — that is intentional.
 - Kramdown inline attribute lists (`{:class="cover"}`) are unsupported.
-- Liquid tags (`{% assign %}`, `{% capture %}`) have no shim; sites must port to Jinja2.
+- Jekyll's own tags — `{% highlight %}`, `{% link %}`, `{% post_url %}`, `{% seo %}` — are not implemented. Add them as Tag subclasses next to `JekyllIncludeTag`.
 - `jekyll-*` plugin names in `plugins:` are silently ignored so an unported config still builds.
